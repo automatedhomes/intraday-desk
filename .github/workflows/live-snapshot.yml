@@ -1,0 +1,54 @@
+# Rebuilds the Intraday Desk snapshot and publishes it to GitHub Pages every 5 minutes
+# while NSE is open (09:15-15:40 IST = 03:45-10:10 UTC, Mon-Fri, NSE holidays skipped in Python).
+# GitHub may start scheduled runs a few minutes late, so expect updates every ~5-15 minutes.
+name: Live snapshot
+
+on:
+  schedule:
+    - cron: "*/5 3-10 * * 1-5"
+  workflow_dispatch:          # "Run workflow" button: builds even when the market is closed
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      built: ${{ steps.snap.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install yfinance pandas numpy
+      - run: python tests/test_smoke.py
+      - id: snap
+        name: Build snapshot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then FLAG=""; else FLAG="--if-open"; fi
+          python intraday_dashboard.py --snapshot site --standalone $FLAG
+          if [ -f site/index.html ]; then echo "built=yes" >> "$GITHUB_OUTPUT"; else echo "built=no" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.snap.outputs.built == 'yes'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.built == 'yes'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
