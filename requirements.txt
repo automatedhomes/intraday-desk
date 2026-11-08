@@ -1,0 +1,4 @@
+yfinance>=0.2.40
+pandas>=1.5
+numpy>=1.23
+pytest>=7  # only for running tests; python tests/test_smoke.py also works without it
