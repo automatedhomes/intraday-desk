@@ -96,6 +96,15 @@ https://claude.ai/artifact/D5RPGKpLiHQDEvNR51CvgC (owner's account; data up to 0
 From here, regenerate with `--snapshot` and host the folder on any static host (GitHub Pages,
 Netlify, Cloudflare Pages) if the owner wants a shareable link.
 
+## Live hosting (set up 09 Nov 2026)
+
+- **GitHub Pages:** https://automatedhomes.github.io/intraday-desk/ (public repo `automatedhomes/intraday-desk`).
+  `.github/workflows/live-snapshot.yml` runs every 5 min 03:45-10:10 UTC Mon-Fri and builds with
+  `--snapshot site --standalone --if-open` (`session_window()` skips holidays); "Run workflow" builds anytime.
+  GitHub's cron often runs late. Public repos' schedules pause after 60 days without a commit.
+- **claude.ai artifact:** https://claude.ai/artifact/HkKNBuUQGBrM9dZCsp1444, republished by a session-only
+  Claude cron job via `live_tick.ps1` (not in git); needs the PC and Claude session open, expires after 7 days.
+
 ## Backlog ideas (ask the owner before starting)
 
 - Scheduled snapshot rebuild during market hours (hourly) + static hosting, for a near-live phone link.
