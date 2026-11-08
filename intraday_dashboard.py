@@ -36,6 +36,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import os
 import re
 import threading
 import time
@@ -792,6 +793,138 @@ def institutional(interval: str = "5m") -> dict:
     return out
 
 
+# ------------------------------------------------------------------------------------------
+# Monthly picks (factor research: docs/FINDINGS.md sections 4-5) and the paper-trading journal
+# ------------------------------------------------------------------------------------------
+PICK_N = 10
+PICK_COST_PCT = 0.30                    # assumed round trip per rebalance (0.15% per side), before tax
+JOURNAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "journal", "paper_journal.json")
+PICK_STRATS = {
+    "momentum": dict(name="Momentum top 10", months=tuple(range(1, 13)), every="monthly",
+                     rule="The 10 stocks with the highest return from 12 months to 1 month before the last month-end. "
+                          "Rebalanced every month."),
+    "lowvol": dict(name="Low volatility top 10", months=(3, 6, 9, 12), every="quarterly",
+                   rule="The 10 stocks with the lowest 1-year daily volatility at the last month-end. "
+                        "Rebalanced every quarter (after March, June, September and December)."),
+}
+_daily_cache: dict = {}
+_picks_cache: dict = {}
+
+
+def daily_closes(ttl: int = 3600) -> pd.DataFrame:
+    """About 2 years of daily closes (dividend-adjusted) for the watchlist stocks plus NIFTY."""
+    hit = _daily_cache.get("c")
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    syms = [s for s in WATCHLIST if s not in ("NIFTY", "BANKNIFTY")]
+    raw = yf.download([resolve(s) for s in syms] + ["^NSEI"], period="2y", interval="1d", auto_adjust=True,
+                      group_by="ticker", threads=True, progress=False)
+    cols = {}
+    for s in syms + ["NIFTY"]:
+        try:
+            c = raw["^NSEI" if s == "NIFTY" else resolve(s)]["Close"].dropna()
+        except KeyError:
+            continue
+        idx = pd.to_datetime(c.index)
+        c.index = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
+        if len(c) > 260:
+            cols[s] = c[~c.index.duplicated(keep="last")]
+    if "NIFTY" not in cols:
+        raise ValueError("No daily data for the Nifty from Yahoo right now.")
+    df = pd.DataFrame(cols).sort_index()
+    _daily_cache["c"] = (time.time(), df)
+    return df
+
+
+def compute_picks(C: pd.DataFrame, n: int = PICK_N) -> dict:
+    """Rank on closes up to the last completed month-end; prices are the latest close."""
+    S = C.drop(columns="NIFTY")
+    last = S.index[-1]
+    form = S.index[S.index.to_period("M") < last.to_period("M")][-1]
+    H = S.loc[:form]
+    vol = H.pct_change().tail(252).std() * math.sqrt(252) * 100
+    mom = (H.iloc[-22] / H.iloc[-253] - 1) * 100 if len(H) >= 253 else pd.Series(np.nan, index=H.columns)
+    ok = mom.notna() & vol.notna() & (H.tail(253).count() >= 253)
+    px = S.iloc[-1]
+
+    def rows(sel):
+        return [dict(rank=i + 1, symbol=s, price=num(px[s]), mom=num(mom[s], 1), vol=num(vol[s], 1))
+                for i, s in enumerate(sel.index)]
+    m = int(last.month)
+    q = next(x for x in (3, 6, 9, 12) if x >= m)
+    return dict(formed=str(form.date()), formation=str(form.to_period("M")), asof=str(last.date()),
+                universe=int(ok.sum()), momentum=rows(mom[ok].sort_values(ascending=False).head(n)),
+                lowvol=rows(vol[ok].sort_values().head(n)),
+                prices={s: num(px[s]) for s in S.columns if pd.notna(px[s])}, nifty=num(C["NIFTY"].iloc[-1]),
+                next=dict(momentum=dt.date(2000, m, 1).strftime("%B"), lowvol=dt.date(2000, q, 1).strftime("%B")))
+
+
+def update_journal(J: dict, P: dict, logged: str) -> dict:
+    """Close the open paper period and open a new one at today's prices when a rebalance is due."""
+    J = json.loads(json.dumps(J))
+    J.setdefault("started", logged)
+    fm, month = P["formation"], int(P["formation"][-2:])
+    for k, sp in PICK_STRATS.items():
+        periods = J.setdefault(k, [])
+        cur = periods[-1] if periods and not periods[-1].get("closed") else None
+        if cur is not None and not (cur["formation"] < fm and month in sp["months"]):
+            continue
+        if cur is not None:
+            cur.update(closed=logged, exit={s: P["prices"].get(s) for s in cur["entry"]}, nifty_exit=P["nifty"])
+        periods.append(dict(formation=fm, formed=P["formed"], opened=logged, closed=None,
+                            entry={r["symbol"]: r["price"] for r in P[k]}, nifty_entry=P["nifty"]))
+    return J
+
+
+def journal_summary(J: dict, P: dict) -> dict:
+    out = {}
+    for k, sp in PICK_STRATS.items():
+        rows, cum, ncum = [], 1.0, 1.0
+        for p in J.get(k, []):
+            closed = bool(p.get("closed"))
+            ex = p.get("exit") if closed else {s: P["prices"].get(s) for s in p["entry"]}
+            nx = p.get("nifty_exit") if closed else P["nifty"]
+            picks_ = [dict(symbol=s, entry=e, now=ex.get(s), ret=num((ex[s] / e - 1) * 100) if e and ex.get(s) else None)
+                      for s, e in p["entry"].items()]
+            rs_ = [x["ret"] for x in picks_ if x["ret"] is not None]
+            gross = float(np.mean(rs_)) if rs_ else 0.0
+            net = gross - PICK_COST_PCT
+            nifty = (nx / p["nifty_entry"] - 1) * 100 if nx and p.get("nifty_entry") else 0.0
+            cum *= 1 + net / 100
+            ncum *= 1 + nifty / 100
+            rows.append(dict(formation=p["formation"], opened=p["opened"], closed=p.get("closed"), open=not closed,
+                             gross=num(gross), net=num(net), nifty=num(nifty), picks=picks_))
+        out[k] = dict(name=sp["name"], every=sp["every"], started=rows[0]["opened"] if rows else None,
+                      periods=rows, cum_net=num((cum - 1) * 100), cum_nifty=num((ncum - 1) * 100))
+    return out
+
+
+def load_journal() -> dict:
+    try:
+        with open(JOURNAL_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def picks(write_journal: bool = False) -> dict:
+    hit = _picks_cache.get("p")
+    if hit and time.time() - hit[0] < 300 and not write_journal:
+        return hit[1]
+    P = compute_picks(daily_closes())
+    J = load_journal()
+    if write_journal:
+        J = update_journal(J, P, now_ist().strftime("%Y-%m-%d %H:%M"))
+        os.makedirs(os.path.dirname(JOURNAL_PATH), exist_ok=True)
+        with open(JOURNAL_PATH, "w", encoding="utf-8") as f:
+            json.dump(J, f, indent=1)
+    out = {k: P[k] for k in ("formed", "formation", "asof", "universe", "momentum", "lowvol", "next")}
+    out.update(generated=now_ist().strftime("%d %b %Y %H:%M"), cost_pct=PICK_COST_PCT,
+               rules={k: v["rule"] for k, v in PICK_STRATS.items()}, journal=journal_summary(J, P))
+    _picks_cache["p"] = (time.time(), out)
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -822,6 +955,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(plan(q.get("interval", "5m"), capital, slip)))
             if u.path == "/api/institutional":
                 return self._send(200, json.dumps(institutional(q.get("interval", "5m"))))
+            if u.path == "/api/picks":
+                return self._send(200, json.dumps(picks()))
             if u.path == "/api/watchlist":
                 return self._send(200, json.dumps(WATCHLIST))
             return self._send(404, json.dumps({"error": "not found"}))
@@ -928,7 +1063,7 @@ tr.sel td{background:var(--panel2)}tr.click{cursor:pointer}tr.click:hover td{bac
 
 BODY = r"""<header>
   <div class="brand">Intraday <span>Desk</span></div>
-  <div class="tabs"><button id="tabPlan">Today's plan</button><button id="tabDesk" class="on">Chart</button><button id="tabScan">Scanner</button><button id="tabInst">Big money</button></div>
+  <div class="tabs"><button id="tabPlan">Today's plan</button><button id="tabDesk" class="on">Chart</button><button id="tabScan">Scanner</button><button id="tabInst">Big money</button><button id="tabPicks">Monthly picks</button></div>
   <input id="sym" list="wl" placeholder="Symbol" autocomplete="off"><datalist id="wl"></datalist>
   <select id="iv"><option value="1m">1 min</option><option value="2m">2 min</option><option value="5m" selected>5 min</option><option value="15m">15 min</option></select>
   <button class="primary" id="go">Load</button>
@@ -1050,6 +1185,23 @@ BODY = r"""<header>
   <div class="card"><div class="row"><h2>Unusual volume on the watchlist (last 5 sessions)</h2><span class="note">5-min candles with volume 4× or more the usual for that time of day</span></div>
     <div class="scroll tall"><table id="inSpikes"></table></div>
     <p class="note">The quantity is everyone's total in that candle, not one buyer. Candles at 9:15 and 3:25 often spike because of the open and close auctions and index rebalancing. Click a row to open its chart.</p></div>
+</section>
+
+<section id="picks" class="hidden">
+  <div class="planhead"><h1>Monthly picks</h1><span class="mute small" id="pkSub">Loading daily data…</span></div>
+  <div class="verdict warn"><b>Longer-term lists, not intraday trades.</b> These follow the two factor rules tested in docs/FINDINGS.md
+    (2016–2026, 43 stocks, after costs and tax). Momentum beat simply holding the same stocks by only about 1% a year, and
+    not in every period; low volatility earned less but fell less (−28% worst fall vs −41%). Both results are flattered by
+    hindsight because the list is today's large caps. The journal below tracks the picks on paper from the day they were
+    logged, so you can see whether they keep working before risking money.</div>
+  <div class="tools">
+    <div class="card"><div class="row"><h2>Momentum top 10</h2><span class="note" id="pkMomNext"></span></div>
+      <p class="note" id="pkMomRule"></p><div class="scroll"><table id="pkMom"></table></div></div>
+    <div class="card"><div class="row"><h2>Low volatility top 10</h2><span class="note" id="pkLowNext"></span></div>
+      <p class="note" id="pkLowRule"></p><div class="scroll"><table id="pkLow"></table></div></div>
+  </div>
+  <div class="card"><div class="row"><h2>Paper-trading journal</h2><span class="note" id="pkJNote"></span></div>
+    <div id="pkJournal"></div></div>
 </section>
 
 <section id="scanner" class="hidden">
@@ -1363,16 +1515,55 @@ async function loadInst(){
     renderInst(I);
   } catch (e) { const b = $('#inErr'); b.textContent = e.message.includes('fetch') ? 'Cannot reach the local server. Is intraday_dashboard.py still running?' : e.message; b.style.display = 'block'; }
 }
+let PICKS = null;
+function pickRows(rows){
+  return '<tr><th>#</th><th>Symbol</th><th>Price</th><th>12-1m return</th><th>1y volatility</th></tr>' + rows.map(r =>
+    `<tr class="click" data-open="${esc(r.symbol)}"><td>${r.rank}</td><td><b>${esc(r.symbol)}</b></td><td>₹${fmt(r.price)}</td>
+     <td class="${cls(r.mom)}">${sgn(r.mom, 1, '%')}</td><td>${fmt(r.vol, 1)}%</td></tr>`).join('');
+}
+function journalCard(j){
+  if (!j.periods.length) return `<div class="tile" style="margin-bottom:10px"><div class="k">${esc(j.name)}</div>
+    <div class="small mute">No entries yet. The first picks are logged at the first update during market hours, at that moment's prices.</div></div>`;
+  const cur = j.periods[j.periods.length - 1], past = j.periods.filter(p => !p.open).reverse();
+  const live = cur.open ? `<p class="small" style="margin:8px 0 4px"><b>Open since ${esc(cur.opened)}</b> (ranked on ${esc(cur.formation)} closes):
+      <span class="${cls(cur.net)}">${sgn(cur.net, 2, '%')}</span> after costs vs Nifty <span class="${cls(cur.nifty)}">${sgn(cur.nifty, 2, '%')}</span></p>
+    <div class="scroll"><table><tr><th>Symbol</th><th>Entry</th><th>Now</th><th>Return</th></tr>${cur.picks.map(p =>
+      `<tr><td><b>${esc(p.symbol)}</b></td><td>₹${fmt(p.entry)}</td><td>₹${fmt(p.now)}</td><td class="${cls(p.ret)}">${sgn(p.ret, 2, '%')}</td></tr>`).join('')}</table></div>` : '';
+  const hist = past.length ? `<div class="scroll" style="margin-top:8px"><table><tr><th>Ranked on</th><th>Held</th><th>Before costs</th><th>After costs</th><th>Nifty</th><th>Beat Nifty?</th></tr>${past.map(p =>
+      `<tr><td>${esc(p.formation)}</td><td class="mute">${esc(p.opened.slice(0, 10))} → ${esc(p.closed.slice(0, 10))}</td><td class="${cls(p.gross)}">${sgn(p.gross, 2, '%')}</td>
+       <td class="${cls(p.net)}"><b>${sgn(p.net, 2, '%')}</b></td><td class="${cls(p.nifty)}">${sgn(p.nifty, 2, '%')}</td><td>${p.net > p.nifty ? '<span class="up">Yes</span>' : '<span class="dn">No</span>'}</td></tr>`).join('')}</table></div>` : '';
+  return `<div class="tile" style="margin-bottom:10px"><div class="row"><div class="k">${esc(j.name)} · rebalanced ${esc(j.every)}</div><span class="small mute">since ${esc(j.started)}</span></div>
+    <div class="v"><span class="${cls(j.cum_net)}">${sgn(j.cum_net, 2, '%')}</span> <span class="small mute">after costs, before tax · Nifty ${sgn(j.cum_nifty, 2, '%')}</span></div>${live}${hist}</div>`;
+}
+function renderPicks(P){
+  PICKS = P;
+  $('#pkSub').textContent = `Ranked on closes up to ${P.formed} · prices as of ${P.asof} · ${P.universe} stocks`;
+  $('#pkMomRule').textContent = P.rules.momentum; $('#pkLowRule').textContent = P.rules.lowvol;
+  $('#pkMomNext').textContent = `next re-rank after ${P.next.momentum} ends`; $('#pkLowNext').textContent = `next re-rank after ${P.next.lowvol} ends`;
+  $('#pkMom').innerHTML = pickRows(P.momentum); $('#pkLow').innerHTML = pickRows(P.lowvol);
+  $('#pkJNote').textContent = `Equal money in each pick · about ${fmt(P.cost_pct, 2)}% costs per rebalance · tax not included · paper only`;
+  $('#pkJournal').innerHTML = journalCard(P.journal.momentum) + journalCard(P.journal.lowvol);
+  document.querySelectorAll('#picks [data-open]').forEach(el => el.onclick = () => { $('#sym').value = el.dataset.open; tab('desk'); load(); });
+}
+async function loadPicks(){
+  try {
+    if (STATIC && !STATIC.picks) throw new Error('This snapshot was built before the Monthly picks tab existed.');
+    const r = await fetch(STATIC ? STATIC.picks : '/api/picks'), P = await r.json();
+    if (!r.ok) throw new Error(P.error || 'Could not load the picks');
+    renderPicks(P);
+  } catch (e) { $('#pkSub').textContent = e.message.includes('fetch') ? 'Cannot reach the local server. Is intraday_dashboard.py still running?' : e.message; }
+}
 function tab(n){
-  [['plan', '#plan', '#tabPlan'], ['desk', '#desk', '#tabDesk'], ['scan', '#scanner', '#tabScan'], ['inst', '#inst', '#tabInst']].forEach(([k, sec, btn]) => {
+  [['plan', '#plan', '#tabPlan'], ['desk', '#desk', '#tabDesk'], ['scan', '#scanner', '#tabScan'], ['inst', '#inst', '#tabInst'], ['picks', '#picks', '#tabPicks']].forEach(([k, sec, btn]) => {
     $(sec).classList.toggle('hidden', n !== k); $(btn).classList.toggle('on', n === k); });
   store.set('tab', n);
+  if (n === 'picks' && !PICKS) loadPicks();
   if (n === 'scan' && !$('#scT').innerHTML) runScan();
   if (n === 'plan' && !PLAN) loadPlan();
   if (n === 'inst' && !INST) loadInst();
   if (n === 'desk' && S.D) requestAnimationFrame(() => render(S.D, false));
 }
-$('#tabInst').onclick = () => tab('inst'); $('#tabPlan').onclick = () => tab('plan'); $('#tabDesk').onclick = () => tab('desk'); $('#tabScan').onclick = () => tab('scan'); $('#scGo').onclick = runScan;
+$('#tabPicks').onclick = () => tab('picks'); $('#tabInst').onclick = () => tab('inst'); $('#tabPlan').onclick = () => tab('plan'); $('#tabDesk').onclick = () => tab('desk'); $('#tabScan').onclick = () => tab('scan'); $('#scGo').onclick = runScan;
 
 // Calculators (same charge model as the backtest)
 function charges(buyV, sellV){ const t = buyV + sellV, br = Math.min(20, .0003 * buyV) + Math.min(20, .0003 * sellV), stt = .00025 * sellV,
@@ -1474,7 +1665,7 @@ CHART_KEYS = ("t", "o", "h", "l", "c", "v", "vwap", "ema9", "ema21", "rsi", "st_
 
 
 def build_snapshot(outdir: str, interval: str = "5m", sessions: int = 6, capital: float = 100000, slip: float = 0.02,
-                   standalone: bool = False):
+                   standalone: bool = False, journal: bool = False):
     """Write a self-contained snapshot (index.html + data/*.json) that works without this server."""
     import os
     os.makedirs(os.path.join(outdir, "data"), exist_ok=True)
@@ -1512,13 +1703,22 @@ def build_snapshot(outdir: str, interval: str = "5m", sessions: int = 6, capital
     with open(os.path.join(outdir, "data", "_inst.json"), "w", encoding="utf-8") as f:
         json.dump(I, f, separators=(",", ":"))
     print(f"  big money: {len(I['block'])} block, {len(I['bulk'])} bulk deals, {len(I['spikes'])} volume spikes")
+    picks_file = None
+    try:
+        K = picks(write_journal=journal)
+        with open(os.path.join(outdir, "data", "_picks.json"), "w", encoding="utf-8") as f:
+            json.dump(K, f, separators=(",", ":"))
+        picks_file = "data/_picks.json"
+        print(f"  monthly picks: ranked on {K['formed']}, journal {'updated' if journal else 'read only'}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  monthly picks skipped: {e}")
     latest = max(last_bars) if last_bars else ""
     try:
         until = dt.datetime.strptime(latest, "%Y-%m-%d %H:%M").strftime("%d %b %Y, %H:%M")
     except ValueError:
         until = latest
     index = dict(generated=gen, gen_ts=int(time.time()), data_until=until, symbols=list(files), files=files, scan="data/_scan.json",
-                 plan="data/_plan.json", inst="data/_inst.json")
+                 plan="data/_plan.json", inst="data/_inst.json", picks=picks_file)
     with open(os.path.join(outdir, "index.html"), "w", encoding="utf-8") as f:
         f.write(standalone_page(index) if standalone else hosted_page(index))
     print(f"Snapshot written to {outdir} ({len(files)} symbols, data up to {until})")
@@ -1533,11 +1733,13 @@ def main():
                     help="with --snapshot: write a complete HTML page for static hosts like GitHub Pages")
     ap.add_argument("--if-open", action="store_true",
                     help="with --snapshot: do nothing unless NSE is in session (09:15-15:40 IST, not a holiday)")
+    ap.add_argument("--journal", action="store_true",
+                    help="with --snapshot: log the monthly picks in journal/paper_journal.json when a rebalance is due")
     a = ap.parse_args()
     if a.snapshot:
         if a.if_open and not session_window(now_ist()):
             return print("Market closed - snapshot skipped.")
-        return build_snapshot(a.snapshot, standalone=a.standalone)
+        return build_snapshot(a.snapshot, standalone=a.standalone, journal=a.journal)
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     url = f"http://127.0.0.1:{a.port}"
     print(f"Intraday Desk running at {url}  (Ctrl+C to stop)")

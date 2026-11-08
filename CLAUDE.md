@@ -105,6 +105,14 @@ Netlify, Cloudflare Pages) if the owner wants a shareable link.
 - **claude.ai artifact:** https://claude.ai/artifact/HkKNBuUQGBrM9dZCsp1444, republished by a session-only
   Claude cron job via `live_tick.ps1` (not in git); needs the PC and Claude session open, expires after 7 days.
 
+## Monthly picks tab and paper journal (added 09 Nov 2026)
+
+- `picks()` → `/api/picks`, `data/_picks.json`: momentum top 10 (12-1m, monthly) and low volatility top 10
+  (1-year vol, quarterly), ranked on closes up to the last completed month-end (`compute_picks`).
+- `journal/paper_journal.json` is the forward paper record. Only the scheduled GitHub run writes it
+  (`--if-open --journal`) and commits it, at live prices; local runs read it. **`git pull --rebase` before pushing.**
+  `update_journal` opens a period when a rebalance is due and closes the previous one at the same prices.
+
 ## Backlog ideas (ask the owner before starting)
 
 - Scheduled snapshot rebuild during market hours (hourly) + static hosting, for a near-live phone link.

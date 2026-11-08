@@ -9,7 +9,7 @@ on:
   workflow_dispatch:          # "Run workflow" button: builds even when the market is closed
 
 permissions:
-  contents: read
+  contents: write             # to save journal/paper_journal.json when the monthly picks are logged
   pages: write
   id-token: write
 
@@ -34,9 +34,20 @@ jobs:
       - id: snap
         name: Build snapshot
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then FLAG=""; else FLAG="--if-open"; fi
+          # Only scheduled runs inside market hours log the paper journal, so entries use live prices.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then FLAG=""; else FLAG="--if-open --journal"; fi
           python intraday_dashboard.py --snapshot site --standalone $FLAG
           if [ -f site/index.html ]; then echo "built=yes" >> "$GITHUB_OUTPUT"; else echo "built=no" >> "$GITHUB_OUTPUT"; fi
+      - name: Save paper journal
+        if: steps.snap.outputs.built == 'yes' && github.event_name == 'schedule'
+        run: |
+          if [ -n "$(git status --porcelain journal)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898494+github-actions[bot]@users.noreply.github.com"
+            git add journal
+            git commit -m "Paper journal: log monthly picks"
+            git pull --rebase -q && git push
+          fi
       - if: steps.snap.outputs.built == 'yes'
         uses: actions/upload-pages-artifact@v3
         with:

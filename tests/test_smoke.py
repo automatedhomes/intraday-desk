@@ -121,6 +121,47 @@ def test_standalone_page_and_session_window():
     assert not idd.session_window(dt.datetime(2026, 11, 8, 11, 0))      # Sunday
 
 
+def synthetic_closes(days=330, end="2026-11-09", n=14, seed=5):
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range(end=end, periods=days)
+    drift = np.linspace(-0.001, 0.002, n)                       # stock k trends harder the higher k is
+    scale = np.linspace(0.005, 0.03, n)[::-1]                   # stock 0 is the most volatile
+    rets = rng.normal(drift, scale, (days, n))
+    C = pd.DataFrame(100 * np.exp(np.cumsum(rets, axis=0)), index=idx, columns=[f"S{k}" for k in range(n)])
+    C["NIFTY"] = 20000 * np.exp(np.cumsum(rng.normal(0.0003, 0.01, days)))
+    return C
+
+
+def test_compute_picks_uses_last_month_end_only():
+    C = synthetic_closes()
+    P = idd.compute_picks(C, n=5)
+    assert P["formed"] == "2026-10-30" and P["formation"] == "2026-10" and P["asof"] == "2026-11-09"
+    assert len(P["momentum"]) == 5 and len(P["lowvol"]) == 5
+    vols = [r["vol"] for r in P["lowvol"]]
+    assert vols == sorted(vols)
+    moms = [r["mom"] for r in P["momentum"]]
+    assert moms == sorted(moms, reverse=True)
+    C2 = C.copy()
+    C2.loc["2026-11-02":, "S0"] *= 50                            # a November jump must not change the ranking
+    assert [r["symbol"] for r in idd.compute_picks(C2, n=5)["momentum"]] == [r["symbol"] for r in P["momentum"]]
+
+
+def test_journal_rebalance_rules():
+    P = idd.compute_picks(synthetic_closes(), n=5)
+    J = idd.update_journal({}, P, "2026-11-09 09:20")
+    assert len(J["momentum"]) == 1 and len(J["lowvol"]) == 1
+    assert idd.update_journal(J, P, "2026-11-09 09:25") == J            # same month: nothing changes
+    P12 = dict(P, formation="2026-11", formed="2026-11-30")
+    J2 = idd.update_journal(J, P12, "2026-12-01 09:20")
+    assert len(J2["momentum"]) == 2 and J2["momentum"][0]["closed"] == "2026-12-01 09:20"
+    assert len(J2["lowvol"]) == 1                                        # quarterly: November is not a quarter end
+    J3 = idd.update_journal(J2, dict(P, formation="2026-12", formed="2026-12-31"), "2027-01-01 09:20")
+    assert len(J3["lowvol"]) == 2
+    S = idd.journal_summary(J2, P12)["momentum"]
+    first = S["periods"][0]
+    assert not first["open"] and abs(first["net"] - (first["gross"] - idd.PICK_COST_PCT)) < 0.02
+
+
 def test_resolve_and_tv_symbols():
     assert idd.resolve("nifty") == "^NSEI" and idd.resolve("SBIN") == "SBIN.NS"
     assert idd.tv_symbol("M&M.NS") == "NSE:M_M" and idd.tv_symbol("^NSEBANK") == "NSE:BANKNIFTY"
