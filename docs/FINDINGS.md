@@ -71,6 +71,28 @@ Each stock gets 1/43 of capital in the per-stock strategies.
 - The universe is today's large caps, so holding them looks far better than the Nifty (20% vs 11%): that gap
   is mostly hindsight, not skill. Yahoo's NIFTYBEES series has a bad split in Dec 2019; use `^NSEI`.
 
+## 5. Published factor rules, after costs and tax, 2016 – Nov 2026 (`research/factor_study.py`)
+
+Web research (Nov 2026: NSE index whitepapers and factsheets, S&P DJI, commercial backtests) says momentum,
+low volatility and quality are the factors with the best Indian record, and that momentum's edge is eaten
+by turnover and has crashed up to ~70%. Quality needs historical fundamentals (not in free data): not tested.
+Rules below follow NSE's published index methods; 0.15%/side costs; tax 20% short-term, 12.5% long-term.
+
+| Strategy | Before costs | After costs | After tax | Max DD | 2016-20 | 2021-now |
+|---|---|---|---|---|---|---|
+| Nifty 50 index, hold (price only) | 11.1% | 11.1% | 10.2% (+~1.3% dividends) | −38% | 12.0% | 10.4% |
+| Hold the same 43 stocks | 20.0% | 20.0% | 18.7% | −41% | 18.4% | 21.3% |
+| NSE momentum, top 10, 6-monthly | 22.1% | 21.7% | 19.1% | −41% | 13.6% | 29.0% |
+| Low volatility, top 10, quarterly | 14.0% | 13.7% | 12.0% | −28% | 15.0% | 12.7% |
+| Momentum + low vol, top 10, 6-monthly | 16.1% | 15.8% | 13.9% | −37% | 12.1% | 19.0% |
+| 12-1m momentum, top 10, monthly | 23.9% | 22.8% | 19.8% | −39% | 19.9% | 25.4% |
+
+- After tax, the best (monthly momentum) beats holding the same stocks by ~1.1%/yr; NSE-style momentum by
+  ~0.4%/yr and only in 2021-now (it lagged in 2016-20). That is too small and too unstable to call an edge.
+- Low volatility gives up return for a smaller crash (−28%); it slightly beat the Nifty after tax.
+- Tax costs momentum about 2-3%/yr versus ~1.3%/yr for holding, which is why holding is so hard to beat.
+- Every portfolio of these stocks beats the Nifty mainly because of survivorship bias (today's winners).
+
 ## How to use these findings
 
 - Judge any new idea on its before-costs edge across many stocks first.
