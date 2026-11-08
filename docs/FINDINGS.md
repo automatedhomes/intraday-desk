@@ -48,6 +48,29 @@ Only 3 of 45 symbols had a setup with positive expected profit after costs, all 
 WIPRO Supertrend short (48% probability of profit, range 36–60%, +₹36/trade, 26 trades),
 ADANIENT ORB long (39%, +₹28), BHARTIARTL ORB long (41%, +₹20).
 
+## 4. Swing and momentum ideas, 2016 – Nov 2026 (`research/swing_momentum.py`)
+
+43 watchlist stocks, daily data, rules fixed before running, 0.15% cost per side, idle cash earns 0%.
+Each stock gets 1/43 of capital in the per-stock strategies.
+
+| Strategy | CAGR after costs | Max drawdown | 2016-20 | 2021-now | Notes |
+|---|---|---|---|---|---|
+| Nifty 50 index, hold (price only) | 11.1% (+~1.3% dividends) | −38% | 12.0% | 10.4% | benchmark |
+| Equal-weight hold of the 43 stocks | 20.2% | −42% | 17.1% | 23.0% | inflated by survivorship bias |
+| Trend pullback (RSI<40 above 200-DMA) | 0.0% (0.8% before costs) | −12% | −1.6% | 1.4% | 1,288 trades, 49% wins, +0.30% gross/trade: no edge |
+| 50-day breakout, 3-ATR trailing stop | 5.8% (6.4% before) | −10% | 5.7% | 5.9% | 954 trades, 43% wins, +3.5% net/trade, held ~41 days |
+| Momentum top 10, 12-1 months (pre-chosen) | 22.6% (23.6% before) | −39% | 20.1% | 24.8% | ~260% one-way turnover a year |
+| Same + cash when Nifty < 200-DMA | 17.6% | −26% | 15.3% | 19.5% | smaller drawdown, lower return |
+
+- Pullback dip-buying has no edge, consistent with section 1.
+- Breakout has a real per-trade edge that survives costs (wins are large), but it sits in cash most of the
+  time, so its total return is well below just holding. Not tested: putting idle cash in a liquid fund.
+- Momentum beat the equal-weight hold by ~2.4%/yr in both halves, and every lookback/size variant with
+  12-1 months beat it too; 6-1 months did not. The margin is small, and short-term capital gains tax (20%)
+  on monthly rotation versus long-term tax (12.5%) on holding would likely take most or all of it.
+- The universe is today's large caps, so holding them looks far better than the Nifty (20% vs 11%): that gap
+  is mostly hindsight, not skill. Yahoo's NIFTYBEES series has a bad split in Dec 2019; use `^NSEI`.
+
 ## How to use these findings
 
 - Judge any new idea on its before-costs edge across many stocks first.
