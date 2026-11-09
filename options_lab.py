@@ -197,3 +197,130 @@ def atm_iv(ch: dict, expiry_i: int = 0):
     s = min(e["strikes"], key=lambda r: abs(r["strike"] - ch["spot"]))
     ivs = [s[c]["iv"] for c in ("CE", "PE") if c in s and s[c]["iv"]]
     return round(sum(ivs) / len(ivs), 1) if ivs else None
+
+
+# ------------------------------------------------------------------------------------------------
+# Probability screener: hold-to-expiry outcomes of simple option setups under a lognormal model
+# ------------------------------------------------------------------------------------------------
+# Model (fixed in advance): price at expiry is lognormal with NO directional drift (mean = today's price) and
+# volatility = the underlying's realised 20-day volatility. Option prices are NSE closes. If realised volatility
+# equals implied volatility, every setup's expected value is about -(charges + bid-ask): an edge can only come
+# from the gap between the two (and from the volatility skew). Exits at expiry at intrinsic value.
+import numpy as np  # noqa: E402
+from statistics import NormalDist  # noqa: E402
+
+SLIP_PCT = {"index": 0.5, "stock": 2.0}          # bid-ask allowance per side, % of premium
+_ZG = np.array([NormalDist().inv_cdf((i + 0.5) / 801) for i in range(801)])   # equal-probability grid
+SETUPS = {
+    "long_call": "Buy call", "long_put": "Buy put",
+    "bull_call": "Bull call spread", "bear_put": "Bear put spread",
+    "bull_put": "Bull put spread (credit)", "bear_call": "Bear call spread (credit)",
+}
+
+
+def terminal_prices(S: float, sigma: float, T: float) -> np.ndarray:
+    return S * np.exp(-0.5 * sigma * sigma * T + sigma * math.sqrt(max(T, 0.0)) * _ZG)
+
+
+def _charges_vec(buy_val, sell_val, orders):
+    turnover = buy_val + sell_val
+    br = 20.0 * orders
+    txn = 0.0003503 * turnover
+    sebi = turnover * 10 / 1e7
+    return br + 0.001 * sell_val + txn + sebi + 0.00003 * buy_val + 0.18 * (br + txn + sebi)
+
+
+def evaluate_legs(legs, S: float, T: float, sigma: float, lot: int, slip_pct: float) -> dict:
+    """legs: [dict(cp, K, side (+1 buy / -1 sell), price)]. Profit per lot at expiry, after charges and bid-ask."""
+    ST = terminal_prices(S, sigma, T)
+    pnl = np.zeros_like(ST)
+    net = 0.0
+    for g in legs:
+        intr = np.maximum(ST - g["K"], 0) if g["cp"] == "CE" else np.maximum(g["K"] - ST, 0)
+        entry, exit_ = g["price"] * lot, intr * lot
+        orders = 1 + (intr > 0)                                   # worthless legs simply expire
+        if g["side"] > 0:
+            ch = _charges_vec(entry, exit_, orders)
+        else:
+            ch = _charges_vec(exit_, entry, orders)
+        pnl += g["side"] * (exit_ - entry) - ch - slip_pct / 100 * (entry + exit_)
+        net += g["side"] * g["price"]
+    win, lose = pnl[pnl > 0], pnl[pnl <= 0]
+    kelly = kelly_fraction(pnl)
+    grid = np.linspace(S * 0.6, S * 1.4, 2001)
+    pg = sum(g["side"] * ((np.maximum(grid - g["K"], 0) if g["cp"] == "CE" else np.maximum(g["K"] - grid, 0)) - g["price"])
+             for g in legs)
+    be = [float(grid[i] + (grid[i + 1] - grid[i]) * (-pg[i]) / (pg[i + 1] - pg[i]))
+          for i in range(len(grid) - 1) if pg[i] * pg[i + 1] < 0]
+    return dict(ev=float(pnl.mean()), pop=float((pnl > 0).mean()), avg_win=float(win.mean()) if len(win) else 0.0,
+                avg_loss=float(lose.mean()) if len(lose) else 0.0, worst=float(pnl.min()), best=float(pnl.max()),
+                net=net, breakevens=be, kelly=kelly)
+
+
+def kelly_fraction(pnl: np.ndarray) -> float:
+    """Share of capital to put at risk (= max loss) per trade that maximises expected log growth, for the given
+    outcome distribution. 0 when the expected value is not positive. Use a fraction (e.g. 1/4) in practice:
+    the distribution itself is only an estimate."""
+    worst = float(pnl.min())
+    if worst >= 0 or pnl.mean() <= 0:
+        return 0.0
+    x = pnl / -worst                                     # outcome per rupee at risk, >= -1
+    fs = np.linspace(0, 0.999, 1000)
+    g = np.array([np.mean(np.log1p(f * x)) for f in fs])
+    return float(fs[int(g.argmax())])
+
+
+def setup_legs(kind: str, exp: dict, S: float, iv: float, T: float):
+    """Choose strikes by a fixed rule: long legs at the money, other legs at fractions of the 1-sigma move."""
+    rows = [r for r in exp["strikes"]]
+    if not rows or T <= 0:
+        return None
+    em = S * iv * math.sqrt(T)
+
+    def pick(cp, target, side):
+        ok = [r for r in rows if cp in r and r[cp]["close"] >= 0.5 and r[cp]["vol"] > 0]
+        if not ok:
+            return None
+        r = min(ok, key=lambda x: abs(x["strike"] - target))
+        return dict(cp=cp, K=r["strike"], side=side, price=r[cp]["close"])
+    L = {
+        "long_call": [("CE", S, 1)], "long_put": [("PE", S, 1)],
+        "bull_call": [("CE", S, 1), ("CE", S + em, -1)], "bear_put": [("PE", S, 1), ("PE", S - em, -1)],
+        "bull_put": [("PE", S - 0.5 * em, -1), ("PE", S - 1.5 * em, 1)],
+        "bear_call": [("CE", S + 0.5 * em, -1), ("CE", S + 1.5 * em, 1)],
+    }[kind]
+    legs = [pick(cp, tgt, sd) for cp, tgt, sd in L]
+    if any(x is None for x in legs):
+        return None
+    if len(legs) == 2 and legs[0]["K"] == legs[1]["K"]:
+        return None                                            # strikes too coarse for this spread
+    return legs
+
+
+def screen_chain(ch: dict, hv: float, min_days: float = 2.0, as_of: dt.datetime | None = None) -> list:
+    """All setups for one underlying's nearest expiry with at least `min_days` left. hv/iv as fractions."""
+    if not ch or not hv:
+        return []
+    exp = next((e for e in ch["expiries"] if e["days"] >= min_days), None)
+    if exp is None:
+        return []
+    S = ch["spot"]
+    when = as_of or dt.datetime.combine(dt.date.fromisoformat(ch["asof"]), dt.time(15, 30))
+    T = years_to_expiry(when, dt.date.fromisoformat(exp["expiry"]))
+    iv = (atm_iv(dict(ch, expiries=[exp])) or hv * 100) / 100
+    slip = SLIP_PCT["index" if ch["index"] else "stock"]
+    out = []
+    for kind in SETUPS:
+        legs = setup_legs(kind, exp, S, iv, T)
+        if not legs:
+            continue
+        r = evaluate_legs(legs, S, T, hv, ch["lot"], slip)
+        risk = max(1.0, -r["worst"])
+        out.append(dict(symbol=ch["symbol"], index=ch["index"], kind=kind, setup=SETUPS[kind], expiry=exp["expiry"],
+                        days=exp["days"], spot=S, lot=ch["lot"], iv=round(iv * 100, 1), hv=round(hv * 100, 1),
+                        legs=legs, net=round(r["net"], 2), net_lot=round(r["net"] * ch["lot"], 0),
+                        limit=round(r["net"] + r["ev"] / ch["lot"], 2), ev=round(r["ev"], 0), pop=round(r["pop"] * 100, 1),
+                        avg_win=round(r["avg_win"], 0), avg_loss=round(r["avg_loss"], 0), max_loss=round(-r["worst"], 0),
+                        best=round(r["best"], 0), ev_per_risk=round(r["ev"] / risk * 100, 2), kelly=round(r["kelly"], 4),
+                        breakevens=[round(b, 2) for b in r["breakevens"]]))
+    return out

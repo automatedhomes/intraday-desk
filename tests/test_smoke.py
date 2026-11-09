@@ -209,6 +209,58 @@ def test_option_chain_from_bhavcopy_rows():
     assert abs(ol.atm_iv(ch) - 15.0) < 0.3
 
 
+def test_screener_maths():
+    import options_lab as ol
+    S, T, v, lot = 25000.0, 7 / 365, 0.16, 65
+    c = ol.bs_price(S, 25000.0, T, v, "CE", r=0.0)
+    # fair price + same volatility in the model -> expected value is just minus the costs
+    r = ol.evaluate_legs([dict(cp="CE", K=25000.0, side=1, price=c)], S, T, v, lot, 0.0)
+    costs = ol.option_charges(c * lot, c * lot)["total"]
+    assert -1.6 * costs < r["ev"] < -0.3 * costs
+    assert 0.2 < r["pop"] < 0.5 and r["breakevens"] and abs(r["breakevens"][0] - (25000 + c)) < 1
+    # debit spread: loss is capped at the debit (+ costs), gain at width - debit
+    legs = [dict(cp="CE", K=25000.0, side=1, price=200.0), dict(cp="CE", K=25300.0, side=-1, price=80.0)]
+    s = ol.evaluate_legs(legs, S, T, v, lot, 0.5)
+    assert -120 * lot - 200 < s["worst"] < -120 * lot and s["best"] < 180 * lot
+    # settling at a known price (T=0) gives one exact outcome
+    up = ol.evaluate_legs(legs, 25500.0, 0.0, 0.0, lot, 0.0)
+    assert up["pop"] == 1.0 and 180 * lot - 250 < up["ev"] < 180 * lot          # width 300 - debit 120, minus charges
+    assert abs(up["best"] - up["worst"]) < 1e-9
+
+
+def test_option_journal_logs_once_and_settles(tmp_path=None, monkeypatch=None):
+    import tempfile
+    import options_lab as ol
+    path = Path(tempfile.mkdtemp()) / "oj.json"
+    old_path, old_bhav = idd.OPT_JOURNAL_PATH, ol.bhavcopy
+    idd.OPT_JOURNAL_PATH = str(path)
+    try:
+        legs = [dict(cp="CE", K=100.0, side=1, price=2.0)]
+        pick = dict(symbol="ABC", index=False, kind="long_call", setup="Buy call", expiry="2026-11-17", legs=legs, lot=100,
+                    spot=100.0, ev=50.0, pop=40.0, max_loss=250.0, kelly=0.05, iv=20.0, hv=30.0)
+        O = dict(asof="2026-11-09", screener=dict(top=[pick]), chains={"ABC": dict(spot_now=101.0)})
+        J = idd.update_option_journal(O)
+        J = idd.update_option_journal(O)                                       # same day again: no duplicate
+        assert len(J["entries"]) == 1 and J["entries"][0]["real"] is None
+        ol.bhavcopy = lambda d, cache=True: pd.DataFrame(dict(symbol=["ABC"], spot=[110.0]))
+        J = idd.update_option_journal(dict(O, asof="2026-11-17", screener=dict(top=[])))
+        e = J["entries"][0]
+        assert e["settle_spot"] == 110.0 and 700 < e["real"] < 800              # (10 - 2) x 100 minus costs
+        S = idd.option_journal_summary(J, O)
+        assert S["settled"] == 1 and S["wins"] == 1 and S["days"] == 2
+    finally:
+        idd.OPT_JOURNAL_PATH, ol.bhavcopy = old_path, old_bhav
+
+
+def test_kelly_fraction():
+    import options_lab as ol
+    # classic bet: win +1 with p=0.6, lose -1 with p=0.4 -> Kelly = 2p-1 = 0.2
+    pnl = np.array([1.0] * 60 + [-1.0] * 40)
+    assert abs(ol.kelly_fraction(pnl) - 0.2) < 0.002
+    assert ol.kelly_fraction(np.array([1.0] * 40 + [-1.0] * 60)) == 0.0        # negative edge -> no bet
+    assert ol.kelly_fraction(np.array([5.0, -1.0, -1.0, -1.0])) > 0              # long shot with positive EV
+
+
 def test_resolve_and_tv_symbols():
     assert idd.resolve("nifty") == "^NSEI" and idd.resolve("SBIN") == "SBIN.NS"
     assert idd.tv_symbol("M&M.NS") == "NSE:M_M" and idd.tv_symbol("^NSEBANK") == "NSE:BANKNIFTY"

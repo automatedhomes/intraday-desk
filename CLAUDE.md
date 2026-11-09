@@ -127,6 +127,15 @@ Netlify, Cloudflare Pages) if the owner wants a shareable link.
 - `research/options_backtest.py` -> `docs/options_backtest.json`, shown in the tab. Results: FINDINGS section 7.
 - Never present option ideas as tips/calls; giving buy/sell recommendations needs SEBI registration.
 
+## Screener, paper engine, sizing (added 09 Nov 2026)
+
+- `screen_chain()` scores 6 setups per underlying (lognormal, no drift, realised 20-day vol from data up to the
+  bhavcopy date - never later); `evaluate_legs()` also returns the Kelly fraction. UI sizes lots from capital,
+  max risk % and a Kelly fraction (default 1/4).
+- Paper engine: `update_option_journal()` (only with `--journal`, i.e. automatic GitHub runs) logs each bhavcopy
+  date's top 10 once in `journal/option_screener.json` and settles at the expiry-day underlying close.
+- FINDINGS sections 8-9: screener calibrated but tested only in a falling window; ML had no skill after costs.
+
 ## Backlog ideas (ask the owner before starting)
 
 - Scheduled snapshot rebuild during market hours (hourly) + static hosting, for a near-live phone link.

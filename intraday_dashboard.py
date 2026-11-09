@@ -952,6 +952,7 @@ def picks(write_journal: bool = False) -> dict:
 # ------------------------------------------------------------------------------------------
 _opt_cache: dict = {}
 OPT_BT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "options_backtest.json")
+OPT_SCREEN_TEST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "option_screener_test.json")
 
 
 def options_payload(ttl: int = 600) -> dict:
@@ -974,7 +975,8 @@ def options_payload(ttl: int = 600) -> dict:
         try:
             d = clean(raw[resolve(s)])
             d["date"] = d.index.date
-            daily = d.groupby("date").agg(O=("Open", "first"), H=("High", "max"), L=("Low", "min"), C=("Close", "last")).tail(21)
+            daily = d.groupby("date").agg(O=("Open", "first"), H=("High", "max"), L=("Low", "min"), C=("Close", "last"))
+            daily = daily[daily.index <= dt.date.fromisoformat(ch["asof"])].tail(21)   # same day as the option closes
             rets = daily["C"].pct_change().dropna()
             ch.update(spot_now=num(d["Close"].iloc[-1]), spot_time=d.index[-1].strftime("%d %b %H:%M"),
                       hv20=num(rets.std() * math.sqrt(252) * 100, 1),
@@ -984,6 +986,24 @@ def options_payload(ttl: int = 600) -> dict:
             ch.update(spot_now=ch["spot"], spot_time=ch["asof"], hv20=None, range_pct=None, move_pct=None)
         ch["atm_iv"] = ol.atm_iv(ch)
         chains[s] = ch
+    cands = []
+    for s, ch in chains.items():
+        if ch.get("hv20"):
+            cands += ol.screen_chain(ch, ch["hv20"] / 100)
+    pos = sorted([c for c in cands if c["ev"] > 0], key=lambda c: -c["ev_per_risk"])
+    top, seen = [], set()
+    for c in pos:
+        if c["symbol"] not in seen:
+            seen.add(c["symbol"])
+            top.append(c)
+    screener = dict(scored=len(cands), positive=len(pos), top=top[:10],
+                    least_bad=sorted(cands, key=lambda c: -c["ev_per_risk"])[:10] if not top else [])
+    scr_test = None
+    try:
+        with open(OPT_SCREEN_TEST_PATH, encoding="utf-8") as f:
+            scr_test = json.load(f)
+    except (OSError, ValueError):
+        pass
     bt = None
     try:
         with open(OPT_BT_PATH, encoding="utf-8") as f:
@@ -991,9 +1011,62 @@ def options_payload(ttl: int = 600) -> dict:
     except (OSError, ValueError):
         pass
     out = dict(asof=str(bhav["date"].iloc[0]), generated=now_ist().strftime("%d %b %Y %H:%M"), r=ol.RISK_FREE,
-               symbols=list(chains), chains=chains, backtest=bt)
+               symbols=list(chains), chains=chains, backtest=bt, screener=screener, screener_test=scr_test,
+               slip_pct=ol.SLIP_PCT)
+    out["paper"] = option_journal_summary(_read_json(OPT_JOURNAL_PATH, {"entries": [], "days": []}), out)
     _opt_cache["o"] = (time.time(), out)
     return out
+
+
+OPT_JOURNAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "journal", "option_screener.json")
+
+
+def _read_json(path: str, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def update_option_journal(O: dict) -> dict:
+    """Paper engine: log each NSE close's screener top 10 once, and settle logged setups at their real expiry price."""
+    import options_lab as ol
+    J = _read_json(OPT_JOURNAL_PATH, {"entries": [], "days": []})
+    asof = O["asof"]
+    if asof not in J["days"]:
+        for rank, c in enumerate(O["screener"]["top"], 1):
+            J["entries"].append({k: c[k] for k in ("symbol", "index", "kind", "setup", "expiry", "legs", "lot", "spot", "ev",
+                                                   "pop", "max_loss", "kelly", "iv", "hv")}
+                                | dict(date=asof, rank=rank, logged=now_ist().strftime("%Y-%m-%d %H:%M"), real=None))
+        J["days"].append(asof)
+    for e in J["entries"]:
+        if e.get("real") is None and e["expiry"] <= asof:
+            b = ol.bhavcopy(dt.date.fromisoformat(e["expiry"]))
+            rows = b[b["symbol"] == e["symbol"]] if b is not None else None
+            if rows is None or rows.empty:
+                continue
+            se = float(rows["spot"].median())
+            slip = ol.SLIP_PCT["index" if e["index"] else "stock"]
+            e.update(settle_spot=round(se, 2), real=round(ol.evaluate_legs(e["legs"], se, 0.0, 0.0, e["lot"], slip)["ev"], 0))
+    os.makedirs(os.path.dirname(OPT_JOURNAL_PATH), exist_ok=True)
+    with open(OPT_JOURNAL_PATH, "w", encoding="utf-8") as f:
+        json.dump(J, f, indent=1)
+    return J
+
+
+def option_journal_summary(J: dict, O: dict) -> dict:
+    done = [e for e in J.get("entries", []) if e.get("real") is not None]
+    live = [e for e in J.get("entries", []) if e.get("real") is None]
+    for e in live:
+        ch = O["chains"].get(e["symbol"], {})
+        e["spot_now"] = ch.get("spot_now")
+    tot = sum(e["real"] for e in done)
+    return dict(started=J["days"][0] if J.get("days") else None, days=len(J.get("days", [])), settled=len(done),
+                open=len(live), wins=sum(e["real"] > 0 for e in done), total=round(tot, 0),
+                predicted=round(sum(e["ev"] for e in done), 0), win_pred=round(sum(e["pop"] for e in done) / len(done), 1) if done else None,
+                recent=sorted(done, key=lambda e: (e["expiry"], e["rank"]), reverse=True)[:30],
+                live=sorted(live, key=lambda e: (e["date"], e["rank"]), reverse=True)[:30])
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1289,6 +1362,27 @@ BODY = r"""<header>
   <div class="verdict warn"><b>A calculator and practice tool, not tips.</b> About 9 in 10 individual F&amp;O traders lost money in
     FY24 and FY25 (SEBI). Buying an option needs the right direction, a big enough move <i>and</i> fast enough timing, because the
     premium shrinks every minute. The backtest below shows how buying options on this dashboard's own signals would have done.</div>
+  <div class="card"><div class="row"><h2>Probability screener: top 10 by expected value</h2><span class="note" id="osNote"></span></div>
+    <div class="verdict" id="osVerdict"></div>
+    <div class="form" style="max-width:560px;grid-template-columns:repeat(3,1fr)">
+      <label>Trading capital (₹)<input id="osCap" type="number" min="10000" step="10000" value="500000"></label>
+      <label>Max risk per trade (%)<input id="osRisk" type="number" min="0.25" max="10" step="0.25" value="2"></label>
+      <label>Kelly fraction<select id="osKf"><option value="0.25" selected>¼ Kelly (usual)</option><option value="0.5">½ Kelly</option><option value="0.1">1/10 Kelly</option></select></label>
+    </div>
+    <div class="scroll"><table id="osTop"></table></div>
+    <p class="note">Sizing: risk = the smaller of (Kelly fraction × the model's Kelly share) and your max risk per trade, as a share of capital,
+      divided by the setup's max loss per lot. Kelly is the bet size that grows money fastest <i>if the odds are right</i>; because these odds are
+      estimates, a quarter or less is the professional norm. 0 lots means the setup costs more than your risk limit allows.</p>
+    <p class="note">How it works: for every underlying, six setups on the nearest expiry with 2+ days left (buy call, buy put, two debit
+      spreads, two credit spreads; strikes by a fixed rule) are priced at NSE's closing prices and held to expiry. The price at
+      expiry is modelled as lognormal with <b>no view on direction</b> and the stock's own <b>20-day realised volatility</b>. Chance of
+      profit, expected profit/loss, average win and loss and breakevens come from that model, after charges and a bid-ask allowance
+      (0.5% index / 2% stock per side). "Worth up to" is the net price at which the expected value would be zero: paying more (or
+      receiving less for credit spreads) removes the edge. If implied and realised volatility were equal, every setup would lose its
+      costs, so any edge here comes only from the gap between them, which can close quickly. Click a row to load it in the builder.</p>
+    <div id="osTest"></div>
+    <h2 style="margin-top:14px">Automatic paper record (forward test)</h2>
+    <div id="osPaper" class="small"></div></div>
   <div class="grid">
     <div>
       <div class="card"><h2>Build a trade</h2>
@@ -1815,6 +1909,49 @@ function olRenderBt(B){
     (x ? `On expiry days it was worse: ${sgn(x.net_pct_premium, 1, '%')} of premium. ` : '') +
     `The same signals traded in shares made ${rs(a.cash_gross)} before costs and ${rs(a.cash_net)} after, per ₹1 lakh. Options don't create an edge the signal doesn't have; they add time decay and wider spreads. Model estimate (Black-Scholes with each option's previous-day implied volatility), not actual fills.`;
 }
+function osLegs(c){ return c.legs.map(l => `${l.side > 0 ? 'Buy' : 'Sell'} ${fmt(l.K, l.K % 1 ? 2 : 0)} ${l.cp} @ ₹${fmt(l.price)}`).join('<br>'); }
+function renderScreener(O){
+  const S = O.screener; if (!S) return;
+  const list = S.top.length ? S.top : S.least_bad, v = $('#osVerdict');
+  $('#osNote').textContent = `${S.scored} setups scored on NSE closes of ${O.asof} · 1 lot each · hold to expiry`;
+  if (S.top.length) { v.className = 'verdict warn';
+    v.innerHTML = `<b>${S.positive} of ${S.scored} setups have a positive expected value in the model</b> (best one per underlying below). These rest on one assumption: that the next days move like the last 20. Check the backtest under this table before trusting them.`; }
+  else { v.className = 'verdict warn'; v.innerHTML = '<b>No setup has a positive expected value in the model.</b> The best trade may be no trade. The least-bad setups are shown for study.'; }
+  const cap = Math.max(0, +$('#osCap').value || 0), maxR = Math.max(0, +$('#osRisk').value || 0) / 100, kf = +$('#osKf').value || 0.25;
+  const size = c => { const f = Math.min(kf * (c.kelly || 0), maxR), lots = c.max_loss > 0 ? Math.floor(cap * f / c.max_loss) : 0;
+    return {f, lots, risk: lots * c.max_loss}; };
+  $('#osTop').innerHTML = '<tr><th>#</th><th>Underlying</th><th>Setup</th><th>Expiry</th><th>Net / share</th><th>Worth up to</th><th>Chance of profit</th><th>Expected P&amp;L / lot</th><th>Avg win / avg loss</th><th>Max loss / lot</th><th>Suggested lots</th><th>Breakeven at expiry</th><th>IV / realised</th></tr>' +
+    list.map((c, i) => { const credit = c.net < 0, z = size(c);
+      return `<tr class="click" data-os="${i}"><td>${i + 1}</td><td><b>${esc(c.symbol)}</b><div class="small mute">₹${fmt(c.spot)} · lot ${c.lot}</div></td>
+      <td style="text-align:left"><b>${esc(c.setup)}</b><div class="small mute">${osLegs(c)}</div></td><td>${esc(c.expiry)}<div class="small mute">${fmt(c.days, 0)} days</div></td>
+      <td>${credit ? 'receive' : 'pay'} ₹${fmt(Math.abs(c.net))}<div class="small mute">${rs(Math.abs(c.net_lot))} / lot</div></td>
+      <td>${credit ? 'receive ≥ ₹' + fmt(Math.max(0, -c.limit)) : 'pay ≤ ₹' + fmt(Math.max(0, c.limit))}</td>
+      <td><b>${fmt(c.pop, 0)}%</b><span class="minibar"><span style="width:${c.pop}%"></span></span></td>
+      <td class="${cls(c.ev)}"><b>${rs(c.ev)}</b><div class="small mute">${sgn(c.ev_per_risk, 1, '%')} of max loss</div></td>
+      <td><span class="up">${rs(c.avg_win)}</span> / <span class="dn">${rs(c.avg_loss)}</span></td><td class="dn">${rs(-c.max_loss)}</td>
+      <td><b>${z.lots}</b><div class="small mute">${z.lots ? 'risk ' + rs(z.risk) + ' (' + fmt(z.risk / Math.max(cap, 1) * 100, 1) + '%)' : (c.kelly ? 'over your limit' : 'no edge')}</div></td>
+      <td>${c.breakevens.map(b => '₹' + fmt(b)).join('<br>') || '—'}</td><td>${fmt(c.iv, 1)}% / ${fmt(c.hv, 1)}%</td></tr>`; }).join('');
+  document.querySelectorAll('#osTop tr[data-os]').forEach(tr => tr.onclick = () => {
+    const c = list[+tr.dataset.os], l = c.legs[0]; $('#olSym').value = c.symbol; olFillSym();
+    const ch = O.chains[c.symbol], ei = ch.expiries.findIndex(e => e.expiry === c.expiry); if (ei >= 0) { $('#olExp').value = ei; olFillExp(); }
+    $('#olCp').value = l.cp; $('#olK').value = l.K; $('#olSide').value = l.side; $('#olSpot').value = c.spot; olFillIV();
+    $('#olSym').scrollIntoView({behavior: 'smooth', block: 'center'}); });
+  const PP = O.paper;
+  $('#osPaper').innerHTML = !PP || !PP.days ? '<p class="mute">Starts automatically: each trading day the GitHub updater logs that day\'s top 10 at NSE closing prices and settles them at the real expiry price. Nothing is logged by hand, so the record cannot be cherry-picked.</p>'
+    : `<p><b>Since ${esc(PP.started)}: ${PP.days} days logged, ${PP.settled} setups settled, ${PP.open} still open.</b> ` +
+      (PP.settled ? `Settled result <b class="${cls(PP.total)}">${rs(PP.total)}</b> (model predicted ${rs(PP.predicted)}), ${PP.wins} of ${PP.settled} won (${fmt(PP.wins / PP.settled * 100, 0)}% vs ${fmt(PP.win_pred, 0)}% predicted).` : 'Nothing has reached expiry yet.') + '</p>' +
+      (PP.recent.length ? '<div class="scroll"><table><tr><th>Logged</th><th>Underlying</th><th>Setup</th><th>Expiry</th><th>Predicted</th><th>Settled at</th><th>Result / lot</th></tr>' + PP.recent.map(e =>
+        `<tr><td>${esc(e.date)} #${e.rank}</td><td><b>${esc(e.symbol)}</b></td><td style="text-align:left">${esc(e.setup)}</td><td>${esc(e.expiry)}</td><td class="${cls(e.ev)}">${rs(e.ev)} · ${fmt(e.pop, 0)}%</td><td>₹${fmt(e.settle_spot)}</td><td class="${cls(e.real)}"><b>${rs(e.real)}</b></td></tr>`).join('') + '</table></div>' : '') +
+      (PP.live.length ? '<details style="margin-top:6px"><summary>Open setups (' + PP.open + ')</summary><div class="scroll"><table><tr><th>Logged</th><th>Underlying</th><th>Setup</th><th>Expiry</th><th>Price then → now</th><th>Predicted</th></tr>' + PP.live.map(e =>
+        `<tr><td>${esc(e.date)} #${e.rank}</td><td><b>${esc(e.symbol)}</b></td><td style="text-align:left">${esc(e.setup)}<div class="small mute">${osLegs(e)}</div></td><td>${esc(e.expiry)}</td><td>₹${fmt(e.spot)} → ₹${fmt(e.spot_now)}</td><td>${rs(e.ev)} · ${fmt(e.pop, 0)}%</td></tr>`).join('') + '</table></div></details>' : '');
+  const T = O.screener_test;
+  $('#osTest').innerHTML = !T ? '' : (() => { const a = T.top10_daily, p = T.positive_ev, all = T.all;
+    return `<div class="verdict ${a && a.real > 0 ? 'ok' : 'warn'}" style="margin-top:10px"><b>Tested on ${T.sessions} sessions (${esc(T.period)}), settled at real expiry prices:</b>
+      each day's top 10 averaged <b class="${cls(a.real)}">${rs(a.real)}</b> per lot (the model predicted ${rs(a.pred)}), winning ${fmt(a.win, 0)}% of the time (predicted ${fmt(a.pred_pop, 0)}%), over ${a.n} setups.
+      All positive-EV setups: ${rs(p.real)} realised vs ${rs(p.pred)} predicted. Everything scored: ${rs(all.real)} per lot. Correlation between predicted and real results: ${fmt(T.corr_pred_real, 2)}.
+      ${T.by_setup && T.by_setup.long_put && T.by_setup.long_call ? `<br><b>Caution:</b> in this window bought puts made ${rs(T.by_setup.long_put.real)} and bought calls ${rs(T.by_setup.long_call.real)} per lot, so falling prices explain much of the profit, not only the model. Only about three monthly expiry cycles are covered.` : ''}
+      ${T.within_setup ? `<br>Direction-neutral check (same setup type, same day): higher-rated half ${Object.values(T.within_setup).filter(v => v.top && v.bottom && v.top.real > v.bottom.real).length} of ${Object.keys(T.within_setup).length} setup types beat the lower-rated half.` : '<br>A direction-neutral check is still being run.'}</div>`; })();
+}
 async function loadOpt(){
   try {
     if (STATIC && !STATIC.options) throw new Error('This snapshot was built before the Options lab existed.');
@@ -1825,9 +1962,10 @@ async function loadOpt(){
     $('#olSym').innerHTML = idx.concat(rest).map(s => `<option>${esc(s)}</option>`).join('');
     $('#olSym').value = O.chains.NIFTY ? 'NIFTY' : O.symbols[0];
     $('#olSub').textContent = `Option closes from NSE for ${O.asof} · underlying prices up to ${(O.chains[$('#olSym').value] || {}).spot_time || '—'} · ${O.symbols.length} underlyings`;
-    olFillSym(); olRenderPaper(); olRenderBt(O.backtest);
+    olFillSym(); olRenderPaper(); olRenderBt(O.backtest); renderScreener(O);
   } catch (e) { $('#olSub').textContent = e.message.includes('fetch') ? 'Cannot reach the local server. Is intraday_dashboard.py still running?' : e.message; }
 }
+['#osCap', '#osRisk', '#osKf'].forEach(s => $(s).oninput = () => OPT && renderScreener(OPT));
 $('#olSym').onchange = olFillSym; $('#olExp').onchange = olFillExp; $('#olCp').onchange = olFillIV; $('#olK').onchange = olFillIV;
 ['#olSide', '#olLots', '#olSpot', '#olIV', '#olHold'].forEach(s => $(s).oninput = olCalc);
 $('#olPaper').onclick = () => { const st = olState(); if (!st) return;
@@ -1997,6 +2135,8 @@ def build_snapshot(outdir: str, interval: str = "5m", sessions: int = 6, capital
     options_file = None
     try:
         O = options_payload()
+        if journal:
+            O["paper"] = option_journal_summary(update_option_journal(O), O)
         with open(os.path.join(outdir, "data", "_options.json"), "w", encoding="utf-8") as f:
             json.dump(O, f, separators=(",", ":"))
         options_file = "data/_options.json"

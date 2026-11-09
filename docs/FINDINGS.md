@@ -140,6 +140,39 @@ Costs: option charges (~₹68 a trade) + bid-ask allowance 0.5% (index) / 2% (st
   they don't create an edge the signal lacks.
 - Model limits: constant implied volatility within the day, model prices instead of actual fills.
 
+## 8. Probability option screener (`options_lab.screen_chain`, `research/option_screener_test.py`)
+
+Six setups per underlying (buy call/put, bull call/bear put debit spreads, bull put/bear call credit spreads),
+nearest expiry with 2+ days, NSE closes, held to expiry. Model: lognormal, no drift, realised 20-day vol.
+Tested on 62 sessions (12 Aug – 9 Nov 2026), 13,440 setups settled at the real expiry price:
+
+| Group | n | Predicted / lot | Realised / lot | Predicted win | Actual win |
+|---|---|---|---|---|---|
+| Everything | 13,440 | −₹467 | −₹111 | 48.1% | 48.5% |
+| Positive model EV | 5,428 | +₹1,882 | +₹2,859 | 50.3% | 53.1% |
+| Each day's top 10 | 510 | +₹5,527 | +₹5,538 | 40.7% | 43.1% |
+
+- Chance-of-profit was well calibrated (e.g. 35% predicted → 36% actual, 75% → 74%) and higher predicted-EV
+  deciles realised more (corr 0.13).
+- But the window was falling: bought puts +₹8,101, bought calls −₹6,360 per lot; bearish setups won, bullish lost.
+  Only ~3 monthly expiry cycles. Treat the top 10 as unproven; the automatic paper record is the real test.
+- Right after results season, 20-day realised vol includes one-off result-day jumps (e.g. RELIANCE 45.7% vs
+  21.3% implied on 9 Nov), which pushes the model toward buying options.
+
+## 9. Machine-learning stock selection, walk-forward 2018 – 2026 (`research/ml_signals.py`)
+
+17 features, target = next 5-day return minus the average stock, retrained yearly, top 10 weekly.
+
+| Strategy | Before costs | After costs | After tax | Max DD |
+|---|---|---|---|---|
+| Nifty 50 hold (price only) | 10.3% | 10.3% | 9.3% | −38% |
+| Hold the same 43 stocks | 17.3% | 17.3% | 16.0% | −39% |
+| Gradient boosting top 10 weekly | 26.4% | 16.2% | 12.3% | −46% |
+| Ridge top 10 weekly | 17.1% | 9.4% | 6.9% | −44% |
+
+Information coefficient +0.007 (t 0.8) and +0.001 (t 0.1): no reliable predictive skill, sign flips by year.
+Weekly turnover ~22-28x a year; costs and short-term tax turn the before-cost gain into a loss versus holding.
+
 ## How to use these findings
 
 - Judge any new idea on its before-costs edge across many stocks first.

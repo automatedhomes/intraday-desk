@@ -1,0 +1,128 @@
+{
+ "generated": "09 Nov 2026 23:17",
+ "period": "2018-01-01 to 2026-11-09",
+ "models": {
+  "Gradient boosting": {
+   "model": "Gradient boosting",
+   "ic_mean": 0.0069,
+   "ic_tstat": 0.79,
+   "spread_5d_pct": 0.08,
+   "by_year": {
+    "2018": {
+     "ic": 0.0262,
+     "spread_5d_pct": 0.594
+    },
+    "2019": {
+     "ic": 0.0083,
+     "spread_5d_pct": 0.05
+    },
+    "2020": {
+     "ic": 0.0069,
+     "spread_5d_pct": 0.036
+    },
+    "2021": {
+     "ic": 0.0086,
+     "spread_5d_pct": 0.068
+    },
+    "2022": {
+     "ic": 0.0147,
+     "spread_5d_pct": 0.091
+    },
+    "2023": {
+     "ic": -0.0273,
+     "spread_5d_pct": -0.254
+    },
+    "2024": {
+     "ic": 0.0039,
+     "spread_5d_pct": -0.086
+    },
+    "2025": {
+     "ic": 0.016,
+     "spread_5d_pct": 0.242
+    },
+    "2026": {
+     "ic": 0.0043,
+     "spread_5d_pct": -0.042
+    }
+   },
+   "portfolio": {
+    "name": "Gradient boosting: top 10, weekly",
+    "before_costs": 26.4,
+    "after_costs": 16.2,
+    "after_tax": 12.3,
+    "max_dd": -46.0,
+    "turnover": 2806.0
+   }
+  },
+  "Linear (ridge)": {
+   "model": "Linear (ridge)",
+   "ic_mean": 0.0007,
+   "ic_tstat": 0.07,
+   "spread_5d_pct": 0.047,
+   "by_year": {
+    "2018": {
+     "ic": 0.0421,
+     "spread_5d_pct": 0.706
+    },
+    "2019": {
+     "ic": 0.0281,
+     "spread_5d_pct": 0.481
+    },
+    "2020": {
+     "ic": -0.0273,
+     "spread_5d_pct": -0.073
+    },
+    "2021": {
+     "ic": -0.0484,
+     "spread_5d_pct": -0.588
+    },
+    "2022": {
+     "ic": 0.0085,
+     "spread_5d_pct": -0.004
+    },
+    "2023": {
+     "ic": 0.0499,
+     "spread_5d_pct": 0.864
+    },
+    "2024": {
+     "ic": -0.0435,
+     "spread_5d_pct": -0.432
+    },
+    "2025": {
+     "ic": -0.0191,
+     "spread_5d_pct": -0.364
+    },
+    "2026": {
+     "ic": 0.0219,
+     "spread_5d_pct": -0.173
+    }
+   },
+   "portfolio": {
+    "name": "Linear (ridge): top 10, weekly",
+    "before_costs": 17.1,
+    "after_costs": 9.4,
+    "after_tax": 6.9,
+    "max_dd": -44.0,
+    "turnover": 2247.0
+   }
+  }
+ },
+ "benchmarks": [
+  {
+   "name": "Nifty 50 index, hold (no dividends)",
+   "before_costs": 10.3,
+   "after_costs": 10.3,
+   "after_tax": 9.3,
+   "max_dd": -38.0,
+   "turnover": 11.0
+  },
+  {
+   "name": "Hold the same stocks (equal, no rebal.)",
+   "before_costs": 17.3,
+   "after_costs": 17.3,
+   "after_tax": 16.0,
+   "max_dd": -39.0,
+   "turnover": 11.0
+  }
+ ]
+}

@@ -1,0 +1,372 @@
+{
+ "generated": "09 Nov 2026 23:19",
+ "period": "2026-08-12 to 2026-11-09",
+ "sessions": 62,
+ "all": {
+  "n": 13440,
+  "pred": -467.0,
+  "real": -111.0,
+  "win": 48.5,
+  "pred_pop": 48.1,
+  "real_pct_risk": -0.69
+ },
+ "positive_ev": {
+  "n": 5428,
+  "pred": 1882.0,
+  "real": 2859.0,
+  "win": 53.1,
+  "pred_pop": 50.3,
+  "real_pct_risk": 19.76
+ },
+ "top10_daily": {
+  "n": 510,
+  "pred": 5527.0,
+  "real": 5538.0,
+  "win": 43.1,
+  "pred_pop": 40.7,
+  "real_pct_risk": 59.34
+ },
+ "by_setup": {
+  "bear_call": {
+   "n": 2216,
+   "pred": -312.0,
+   "real": 2179.0,
+   "win": 87.9,
+   "pred_pop": 74.8,
+   "real_pct_risk": 7.96
+  },
+  "bear_put": {
+   "n": 2247,
+   "pred": 284.0,
+   "real": 5595.0,
+   "win": 57.8,
+   "pred_pop": 38.6,
+   "real_pct_risk": 64.19
+  },
+  "bull_call": {
+   "n": 2247,
+   "pred": -1114.0,
+   "real": -4906.0,
+   "win": 19.9,
+   "pred_pop": 35.9,
+   "real_pct_risk": -49.9
+  },
+  "bull_put": {
+   "n": 2210,
+   "pred": -982.0,
+   "real": -5343.0,
+   "win": 56.2,
+   "pred_pop": 73.3,
+   "real_pct_risk": -20.04
+  },
+  "long_call": {
+   "n": 2260,
+   "pred": -1128.0,
+   "real": -6360.0,
+   "win": 16.3,
+   "pred_pop": 32.0,
+   "real_pct_risk": -49.2
+  },
+  "long_put": {
+   "n": 2260,
+   "pred": 444.0,
+   "real": 8101.0,
+   "win": 53.8,
+   "pred_pop": 35.0,
+   "real_pct_risk": 71.71
+  }
+ },
+ "index": {
+  "n": 660,
+  "pred": -743.0,
+  "real": 775.0,
+  "win": 48.0,
+  "pred_pop": 48.3,
+  "real_pct_risk": 4.5
+ },
+ "stock": {
+  "n": 12780,
+  "pred": -452.0,
+  "real": -157.0,
+  "win": 48.6,
+  "pred_pop": 48.1,
+  "real_pct_risk": -0.98
+ },
+ "deciles": [
+  {
+   "decile": 1,
+   "n": 1344,
+   "pred": -4782.0,
+   "real": -2779.0,
+   "win": 28.0,
+   "pred_pop": 27.4,
+   "real_pct_risk": -20.18
+  },
+  {
+   "decile": 2,
+   "n": 1344,
+   "pred": -2690.0,
+   "real": -2644.0,
+   "win": 35.0,
+   "pred_pop": 36.0,
+   "real_pct_risk": -19.21
+  },
+  {
+   "decile": 3,
+   "n": 1344,
+   "pred": -2085.0,
+   "real": -2775.0,
+   "win": 43.3,
+   "pred_pop": 45.1,
+   "real_pct_risk": -17.14
+  },
+  {
+   "decile": 4,
+   "n": 1344,
+   "pred": -1467.0,
+   "real": -2895.0,
+   "win": 48.1,
+   "pred_pop": 52.9,
+   "real_pct_risk": -16.26
+  },
+  {
+   "decile": 5,
+   "n": 1344,
+   "pred": -926.0,
+   "real": -1444.0,
+   "win": 56.5,
+   "pred_pop": 58.0,
+   "real_pct_risk": -7.27
+  },
+  {
+   "decile": 6,
+   "n": 1344,
+   "pred": -316.0,
+   "real": -93.0,
+   "win": 62.5,
+   "pred_pop": 60.9,
+   "real_pct_risk": -0.43
+  },
+  {
+   "decile": 7,
+   "n": 1344,
+   "pred": 405.0,
+   "real": 558.0,
+   "win": 61.0,
+   "pred_pop": 59.8,
+   "real_pct_risk": 2.7
+  },
+  {
+   "decile": 8,
+   "n": 1344,
+   "pred": 1197.0,
+   "real": 1551.0,
+   "win": 56.6,
+   "pred_pop": 56.9,
+   "real_pct_risk": 8.68
+  },
+  {
+   "decile": 9,
+   "n": 1344,
+   "pred": 1713.0,
+   "real": 5085.0,
+   "win": 53.3,
+   "pred_pop": 43.3,
+   "real_pct_risk": 46.77
+  },
+  {
+   "decile": 10,
+   "n": 1344,
+   "pred": 4283.0,
+   "real": 4323.0,
+   "win": 41.0,
+   "pred_pop": 40.8,
+   "real_pct_risk": 52.37
+  }
+ ],
+ "calibration": [
+  {
+   "bucket": "(0, 30]",
+   "n": 1319,
+   "pred": -4543.0,
+   "real": -2786.0,
+   "win": 26.8,
+   "pred_pop": 26.8,
+   "real_pct_risk": -20.73
+  },
+  {
+   "bucket": "(30, 40]",
+   "n": 6060,
+   "pred": -305.0,
+   "real": 410.0,
+   "win": 36.4,
+   "pred_pop": 35.3,
+   "real_pct_risk": 3.82
+  },
+  {
+   "bucket": "(40, 50]",
+   "n": 1631,
+   "pred": 2712.0,
+   "real": 4091.0,
+   "win": 47.1,
+   "pred_pop": 42.4,
+   "real_pct_risk": 48.93
+  },
+  {
+   "bucket": "(50, 60]",
+   "n": 50,
+   "pred": -3193.0,
+   "real": -1917.0,
+   "win": 66.0,
+   "pred_pop": 58.2,
+   "real_pct_risk": -10.88
+  },
+  {
+   "bucket": "(60, 70]",
+   "n": 1014,
+   "pred": -2745.0,
+   "real": -2490.0,
+   "win": 67.4,
+   "pred_pop": 66.6,
+   "real_pct_risk": -9.88
+  },
+  {
+   "bucket": "(70, 80]",
+   "n": 2657,
+   "pred": -484.0,
+   "real": -1218.0,
+   "win": 74.0,
+   "pred_pop": 74.8,
+   "real_pct_risk": -4.41
+  },
+  {
+   "bucket": "(80, 100]",
+   "n": 707,
+   "pred": 1947.0,
+   "real": -1585.0,
+   "win": 72.1,
+   "pred_pop": 83.5,
+   "real_pct_risk": -5.68
+  }
+ ],
+ "corr_pred_real": 0.128,
+ "within_setup": {
+  "bear_call": {
+   "top": {
+    "n": 1135,
+    "pred": 954.0,
+    "real": 1881.0,
+    "win": 86.1,
+    "pred_pop": 78.3,
+    "real_pct_risk": 6.86
+   },
+   "bottom": {
+    "n": 1081,
+    "pred": -1641.0,
+    "real": 2492.0,
+    "win": 89.8,
+    "pred_pop": 71.2,
+    "real_pct_risk": 9.12
+   }
+  },
+  "bear_put": {
+   "top": {
+    "n": 1151,
+    "pred": 1455.0,
+    "real": 6788.0,
+    "win": 58.9,
+    "pred_pop": 40.9,
+    "real_pct_risk": 83.64
+   },
+   "bottom": {
+    "n": 1096,
+    "pred": -946.0,
+    "real": 4342.0,
+    "win": 56.7,
+    "pred_pop": 36.1,
+    "real_pct_risk": 46.45
+   }
+  },
+  "bull_call": {
+   "top": {
+    "n": 1152,
+    "pred": 33.0,
+    "real": -4667.0,
+    "win": 19.5,
+    "pred_pop": 38.3,
+    "real_pct_risk": -52.56
+   },
+   "bottom": {
+    "n": 1095,
+    "pred": -2320.0,
+    "real": -5157.0,
+    "win": 20.4,
+    "pred_pop": 33.4,
+    "real_pct_risk": -47.61
+   }
+  },
+  "bull_put": {
+   "top": {
+    "n": 1130,
+    "pred": 333.0,
+    "real": -5013.0,
+    "win": 55.7,
+    "pred_pop": 77.3,
+    "real_pct_risk": -19.0
+   },
+   "bottom": {
+    "n": 1080,
+    "pred": -2357.0,
+    "real": -5688.0,
+    "win": 56.8,
+    "pred_pop": 69.2,
+    "real_pct_risk": -21.1
+   }
+  },
+  "long_call": {
+   "top": {
+    "n": 1160,
+    "pred": 1371.0,
+    "real": -6173.0,
+    "win": 15.7,
+    "pred_pop": 35.1,
+    "real_pct_risk": -51.25
+   },
+   "bottom": {
+    "n": 1100,
+    "pred": -3763.0,
+    "real": -6557.0,
+    "win": 17.0,
+    "pred_pop": 28.7,
+    "real_pct_risk": -47.33
+   }
+  },
+  "long_put": {
+   "top": {
+    "n": 1160,
+    "pred": 2892.0,
+    "real": 8783.0,
+    "win": 53.6,
+    "pred_pop": 38.2,
+    "real_pct_risk": 83.34
+   },
+   "bottom": {
+    "n": 1100,
+    "pred": -2138.0,
+    "real": 7382.0,
+    "win": 54.0,
+    "pred_pop": 31.6,
+    "real_pct_risk": 61.03
+   }
+  }
+ },
+ "within_setup_corr": {
+  "bear_call": 0.083,
+  "bear_put": 0.098,
+  "bull_call": 0.086,
+  "bull_put": 0.414,
+  "long_call": 0.08,
+  "long_put": 0.012
+ },
+ "nifty_move_pct": 2.49
+}
