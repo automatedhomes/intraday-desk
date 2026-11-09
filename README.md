@@ -6,6 +6,8 @@ Tools for analysing NSE stocks, built with Claude.
   VWAP, EMAs, Supertrend and key levels; a ranked plan for the day with probability of profit;
   live signals for three setups; after-cost backtests; a watchlist scanner; and a Big money tab
   with NSE block/bulk deals, FII/DII flows and unusual-volume candles.
+- **Options lab** tab — payoff charts, premiums and Greeks from NSE option prices, paper option trades, and a
+  backtest of buying options on the dashboard's signals (after F&O charges).
 - **`stock_analyzer.py`** — a swing analyzer: fundamentals + technicals + news → a buy/sell call,
   with a 5-year backtest and an HTML report.
 

@@ -116,6 +116,30 @@ What changed in the dashboard: Monthly picks now uses banding (10/20) for moment
 only on picks that change, and the tab shows a 70/30 core-satellite plan. Intraday setups are unchanged: no
 institutional technique fixes a strategy with no edge before costs.
 
+## 7. Buying options on the intraday signals (`research/options_backtest.py`, `docs/options_backtest.json`)
+
+60 sessions (13 Aug – 9 Nov 2026), every signal of the three intraday setups on 45 symbols. Long signal →
+buy the at-the-money call, short → the put, nearest expiry, 1 lot. Premium by Black-Scholes at the actual
+entry/exit prices and times, with each contract's implied volatility from NSE's previous-day close.
+Costs: option charges (~₹68 a trade) + bid-ask allowance 0.5% (index) / 2% (stock) of premium per side.
+
+| Setup / options on | Trades | Win (net) | Premium/lot | Before costs | Net / trade | Net % of premium |
+|---|---|---|---|---|---|---|
+| ORB / indices | 142 | 31.7% | ₹11,655 | +₹238 | +₹51 | +0.4% |
+| ORB / stocks | 1,642 | 27.3% | ₹11,579 | +₹128 | −₹407 | −3.5% |
+| Pullback / indices | 119 | 31.1% | ₹11,760 | −₹81 | −₹268 | −2.3% |
+| Pullback / stocks | 2,507 | 28.2% | ₹11,310 | +₹18 | −₹503 | −4.4% |
+| Supertrend / indices | 100 | 23.0% | ₹13,101 | −₹451 | −₹650 | −5.0% |
+| Supertrend / stocks | 2,199 | 31.5% | ₹11,094 | +₹87 | −₹427 | −3.8% |
+| **All** | **6,709** | **29.1%** | ₹11,347 | +₹63 | **−₹441** | **−3.9%** |
+
+- Before costs the signals are roughly break-even in options too (+₹63 a trade); charges (₹68) and the
+  bid-ask spread (₹436, mostly wide stock-option spreads) turn that into a loss. Expiry-day trades: −13% of premium.
+- ORB on index options is the only line near zero (+₹51, 142 trades): too few trades and too small to call an edge.
+- The same signals in shares: +₹6 before and −₹115 after costs per ₹1 lakh. Options add time decay and spreads;
+  they don't create an edge the signal lacks.
+- Model limits: constant implied volatility within the day, model prices instead of actual fills.
+
 ## How to use these findings
 
 - Judge any new idea on its before-costs edge across many stocks first.

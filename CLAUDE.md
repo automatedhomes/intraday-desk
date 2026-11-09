@@ -117,6 +117,16 @@ Netlify, Cloudflare Pages) if the owner wants a shareable link.
 - Momentum uses banding (`PICK_BAND = 20`): `picks()` passes the open journal holdings to `compute_picks(held=...)`.
   `CORE_PCT = 70` drives the core-satellite card. Evidence: docs/FINDINGS.md section 6.
 
+## Options lab (added 09 Nov 2026)
+
+- `options_lab.py` (separate module): Black-Scholes, Greeks, implied vol, option charges (STT 0.1% sell premium,
+  NSE txn 0.03503%), NSE F&O bhavcopy (UDiFF zip, cached in `cache/fo/`, gitignored) and `chain()`.
+  The JS in `intraday_dashboard.py` duplicates bs/greeks/charges - change both (a QuickJS check matched to 0.0005).
+- `options_payload()` -> `/api/options`, `data/_options.json`: EOD chains + live underlying from `batch("5m")`.
+- Paper option trades live in the browser (localStorage `idesk_optpaper`), valued at the model price.
+- `research/options_backtest.py` -> `docs/options_backtest.json`, shown in the tab. Results: FINDINGS section 7.
+- Never present option ideas as tips/calls; giving buy/sell recommendations needs SEBI registration.
+
 ## Backlog ideas (ask the owner before starting)
 
 - Scheduled snapshot rebuild during market hours (hourly) + static hosting, for a near-live phone link.

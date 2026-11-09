@@ -1,0 +1,193 @@
+{
+ "generated": "09 Nov 2026 22:30",
+ "sessions": 60,
+ "period": "2026-08-13 to 2026-11-09",
+ "symbols": 45,
+ "slippage_pct": {
+  "index": 0.5,
+  "stock": 2.0
+ },
+ "skipped": {
+  "no implied vol (stale/illiquid close)": 62,
+  "premium under Rs 0.50": 93
+ },
+ "setups": {
+  "orb": {
+   "name": "Opening Range Breakout",
+   "index": {
+    "trades": 142,
+    "win_gross": 34.5,
+    "win_net": 31.7,
+    "premium": 11655.0,
+    "gross": 238.0,
+    "charges": 69.0,
+    "slip": 118.0,
+    "net": 51.0,
+    "net_pct_premium": 0.4,
+    "total_net": 7180.0,
+    "cash_gross": 13.0,
+    "cash_net": -88.0
+   },
+   "stock": {
+    "trades": 1642,
+    "win_gross": 35.2,
+    "win_net": 27.3,
+    "premium": 11579.0,
+    "gross": 128.0,
+    "charges": 69.0,
+    "slip": 466.0,
+    "net": -407.0,
+    "net_pct_premium": -3.5,
+    "total_net": -667542.0,
+    "cash_gross": 20.0,
+    "cash_net": -102.0
+   },
+   "all": {
+    "trades": 1784,
+    "win_gross": 35.1,
+    "win_net": 27.7,
+    "premium": 11585.0,
+    "gross": 137.0,
+    "charges": 69.0,
+    "slip": 438.0,
+    "net": -370.0,
+    "net_pct_premium": -3.2,
+    "total_net": -660362.0,
+    "cash_gross": 19.0,
+    "cash_net": -101.0
+   }
+  },
+  "pullback": {
+   "name": "VWAP-EMA Pullback",
+   "index": {
+    "trades": 119,
+    "win_gross": 31.9,
+    "win_net": 31.1,
+    "premium": 11760.0,
+    "gross": -81.0,
+    "charges": 69.0,
+    "slip": 117.0,
+    "net": -268.0,
+    "net_pct_premium": -2.3,
+    "total_net": -31834.0,
+    "cash_gross": -9.0,
+    "cash_net": -109.0
+   },
+   "stock": {
+    "trades": 2507,
+    "win_gross": 32.3,
+    "win_net": 28.2,
+    "premium": 11310.0,
+    "gross": 18.0,
+    "charges": 68.0,
+    "slip": 453.0,
+    "net": -503.0,
+    "net_pct_premium": -4.4,
+    "total_net": -1260188.0,
+    "cash_gross": -2.0,
+    "cash_net": -124.0
+   },
+   "all": {
+    "trades": 2626,
+    "win_gross": 32.3,
+    "win_net": 28.3,
+    "premium": 11331.0,
+    "gross": 14.0,
+    "charges": 68.0,
+    "slip": 438.0,
+    "net": -492.0,
+    "net_pct_premium": -4.3,
+    "total_net": -1292022.0,
+    "cash_gross": -2.0,
+    "cash_net": -123.0
+   }
+  },
+  "supertrend": {
+   "name": "Supertrend + VWAP",
+   "index": {
+    "trades": 100,
+    "win_gross": 25.0,
+    "win_net": 23.0,
+    "premium": 13101.0,
+    "gross": -451.0,
+    "charges": 71.0,
+    "slip": 129.0,
+    "net": -650.0,
+    "net_pct_premium": -5.0,
+    "total_net": -65019.0,
+    "cash_gross": -60.0,
+    "cash_net": -159.0
+   },
+   "stock": {
+    "trades": 2199,
+    "win_gross": 40.7,
+    "win_net": 31.5,
+    "premium": 11094.0,
+    "gross": 87.0,
+    "charges": 68.0,
+    "slip": 445.0,
+    "net": -427.0,
+    "net_pct_premium": -3.8,
+    "total_net": -938710.0,
+    "cash_gross": 8.0,
+    "cash_net": -114.0
+   },
+   "all": {
+    "trades": 2299,
+    "win_gross": 40.1,
+    "win_net": 31.1,
+    "premium": 11181.0,
+    "gross": 63.0,
+    "charges": 68.0,
+    "slip": 432.0,
+    "net": -437.0,
+    "net_pct_premium": -3.9,
+    "total_net": -1003730.0,
+    "cash_gross": 5.0,
+    "cash_net": -116.0
+   }
+  }
+ },
+ "all": {
+  "trades": 6709,
+  "win_gross": 35.7,
+  "win_net": 29.1,
+  "premium": 11347.0,
+  "gross": 63.0,
+  "charges": 68.0,
+  "slip": 436.0,
+  "net": -441.0,
+  "net_pct_premium": -3.9,
+  "total_net": -2956113.0,
+  "cash_gross": 6.0,
+  "cash_net": -115.0
+ },
+ "expiry_day": {
+  "trades": 320,
+  "win_gross": 20.6,
+  "win_net": 19.1,
+  "premium": 2284.0,
+  "gross": -167.0,
+  "charges": 51.0,
+  "slip": 78.0,
+  "net": -297.0,
+  "net_pct_premium": -13.0,
+  "total_net": -94999.0,
+  "cash_gross": -80.0,
+  "cash_net": -200.0
+ },
+ "not_expiry_day": {
+  "trades": 6389,
+  "win_gross": 36.5,
+  "win_net": 29.6,
+  "premium": 11801.0,
+  "gross": 75.0,
+  "charges": 69.0,
+  "slip": 454.0,
+  "net": -448.0,
+  "net_pct_premium": -3.8,
+  "total_net": -2861114.0,
+  "cash_gross": 10.0,
+  "cash_net": -110.0
+ }
+}

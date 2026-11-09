@@ -947,6 +947,55 @@ def picks(write_journal: bool = False) -> dict:
     return out
 
 
+# ------------------------------------------------------------------------------------------
+# Options lab: NSE end-of-day option chains (bhavcopy) + live underlying prices; maths in options_lab.py
+# ------------------------------------------------------------------------------------------
+_opt_cache: dict = {}
+OPT_BT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "options_backtest.json")
+
+
+def options_payload(ttl: int = 600) -> dict:
+    import options_lab as ol
+    hit = _opt_cache.get("o")
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    bhav = ol.latest_bhavcopy(now_ist().date())
+    if bhav is None:
+        raise ValueError("NSE's option price file could not be downloaded right now.")
+    try:
+        raw = batch("5m")
+    except Exception:  # noqa: BLE001
+        raw = None
+    chains = {}
+    for s in WATCHLIST:
+        ch = ol.chain(bhav, s)
+        if not ch:
+            continue
+        try:
+            d = clean(raw[resolve(s)])
+            d["date"] = d.index.date
+            daily = d.groupby("date").agg(O=("Open", "first"), H=("High", "max"), L=("Low", "min"), C=("Close", "last")).tail(21)
+            rets = daily["C"].pct_change().dropna()
+            ch.update(spot_now=num(d["Close"].iloc[-1]), spot_time=d.index[-1].strftime("%d %b %H:%M"),
+                      hv20=num(rets.std() * math.sqrt(252) * 100, 1),
+                      range_pct=num(((daily.H - daily.L) / daily.O).tail(20).mean() * 100),
+                      move_pct=num(((daily.C - daily.O).abs() / daily.O).tail(20).mean() * 100))
+        except Exception:  # noqa: BLE001
+            ch.update(spot_now=ch["spot"], spot_time=ch["asof"], hv20=None, range_pct=None, move_pct=None)
+        ch["atm_iv"] = ol.atm_iv(ch)
+        chains[s] = ch
+    bt = None
+    try:
+        with open(OPT_BT_PATH, encoding="utf-8") as f:
+            bt = json.load(f)
+    except (OSError, ValueError):
+        pass
+    out = dict(asof=str(bhav["date"].iloc[0]), generated=now_ist().strftime("%d %b %Y %H:%M"), r=ol.RISK_FREE,
+               symbols=list(chains), chains=chains, backtest=bt)
+    _opt_cache["o"] = (time.time(), out)
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -977,6 +1026,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(plan(q.get("interval", "5m"), capital, slip)))
             if u.path == "/api/institutional":
                 return self._send(200, json.dumps(institutional(q.get("interval", "5m"))))
+            if u.path == "/api/options":
+                return self._send(200, json.dumps(options_payload()))
             if u.path == "/api/picks":
                 return self._send(200, json.dumps(picks()))
             if u.path == "/api/watchlist":
@@ -1085,7 +1136,7 @@ tr.sel td{background:var(--panel2)}tr.click{cursor:pointer}tr.click:hover td{bac
 
 BODY = r"""<header>
   <div class="brand">Intraday <span>Desk</span></div>
-  <div class="tabs"><button id="tabPlan">Today's plan</button><button id="tabDesk" class="on">Chart</button><button id="tabScan">Scanner</button><button id="tabInst">Big money</button><button id="tabPicks">Monthly picks</button></div>
+  <div class="tabs"><button id="tabPlan">Today's plan</button><button id="tabDesk" class="on">Chart</button><button id="tabScan">Scanner</button><button id="tabInst">Big money</button><button id="tabPicks">Monthly picks</button><button id="tabOpt">Options lab</button></div>
   <input id="sym" list="wl" placeholder="Symbol" autocomplete="off"><datalist id="wl"></datalist>
   <select id="iv"><option value="1m">1 min</option><option value="2m">2 min</option><option value="5m" selected>5 min</option><option value="15m">15 min</option></select>
   <button class="primary" id="go">Load</button>
@@ -1231,6 +1282,43 @@ BODY = r"""<header>
   </div>
   <div class="card"><div class="row"><h2>Paper-trading journal</h2><span class="note" id="pkJNote"></span></div>
     <div id="pkJournal"></div></div>
+</section>
+
+<section id="opt" class="hidden">
+  <div class="planhead"><h1>Options lab</h1><span class="mute small" id="olSub">Loading NSE option prices…</span></div>
+  <div class="verdict warn"><b>A calculator and practice tool, not tips.</b> About 9 in 10 individual F&amp;O traders lost money in
+    FY24 and FY25 (SEBI). Buying an option needs the right direction, a big enough move <i>and</i> fast enough timing, because the
+    premium shrinks every minute. The backtest below shows how buying options on this dashboard's own signals would have done.</div>
+  <div class="grid">
+    <div>
+      <div class="card"><h2>Build a trade</h2>
+        <div class="form" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+          <label>Underlying<select id="olSym"></select></label>
+          <label>Expiry<select id="olExp"></select></label>
+          <label>Call / put<select id="olCp"><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label>
+          <label>Buy / sell<select id="olSide"><option value="1">Buy</option><option value="-1">Sell (write)</option></select></label>
+          <label>Strike<select id="olK"></select></label>
+          <label>Lots<input id="olLots" type="number" min="1" step="1" value="1"></label>
+          <label>Price now (₹)<input id="olSpot" type="number" step="0.05"></label>
+          <label>Implied vol (%)<input id="olIV" type="number" step="0.1"></label>
+          <label>Hold for (hours)<input id="olHold" type="number" min="0" step="0.25" value="1"></label>
+        </div>
+        <div id="olOut" class="out"></div>
+        <div class="row" style="margin-top:8px"><span class="note" id="olNote"></span><button class="primary" id="olPaper">Paper-trade this</button></div>
+      </div>
+      <div class="card"><div class="row"><h2>Profit / loss</h2><span class="note">solid: on expiry day · dashed: after your holding time · after charges</span></div>
+        <div id="olPay"></div></div>
+    </div>
+    <aside>
+      <div class="card"><div class="row"><h2>Option chain</h2><span class="note" id="olChainNote"></span></div>
+        <div class="scroll tall"><table id="olChain"></table></div>
+        <p class="note">Closing prices from NSE's end-of-day file. Click a price to load that option.</p></div>
+    </aside>
+  </div>
+  <div class="card"><div class="row"><h2>My paper trades</h2><span class="note" id="olPaperNote">Saved in this browser only</span></div>
+    <div class="scroll"><table id="olPaperT"></table></div></div>
+  <div class="card"><div class="row"><h2>Backtest: buying options on this dashboard's signals</h2><span class="note" id="olBtNote"></span></div>
+    <div class="scroll"><table id="olBt"></table></div><p class="note" id="olBtText"></p></div>
 </section>
 
 <section id="scanner" class="hidden">
@@ -1591,17 +1679,173 @@ async function loadPicks(){
     renderPicks(P);
   } catch (e) { $('#pkSub').textContent = e.message.includes('fetch') ? 'Cannot reach the local server. Is intraday_dashboard.py still running?' : e.message; }
 }
+// Options lab. Pricing and charges duplicate options_lab.py - change both together.
+let OPT = null;
+const erf = x => { const s = Math.sign(x), a = Math.abs(x), t = 1 / (1 + 0.3275911 * a);
+  return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a)); };
+const Nc = x => 0.5 * (1 + erf(x / Math.SQRT2)), nd = x => Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+function bs(S, K, T, v, cp, r){
+  if (T <= 0 || v <= 0) return cp === 'CE' ? Math.max(0, S - K) : Math.max(0, K - S);
+  const st = v * Math.sqrt(T), d1 = (Math.log(S / K) + (r + v * v / 2) * T) / st, d2 = d1 - st;
+  return cp === 'CE' ? S * Nc(d1) - K * Math.exp(-r * T) * Nc(d2) : K * Math.exp(-r * T) * Nc(-d2) - S * Nc(-d1);
+}
+function grk(S, K, T, v, cp, r){
+  T = Math.max(T, 1 / 525600);
+  const st = v * Math.sqrt(T), d1 = (Math.log(S / K) + (r + v * v / 2) * T) / st, d2 = d1 - st, c = -S * nd(d1) * v / (2 * Math.sqrt(T));
+  return {delta: cp === 'CE' ? Nc(d1) : Nc(d1) - 1, vega: S * nd(d1) * Math.sqrt(T) / 100,
+          theta: (cp === 'CE' ? c - r * K * Math.exp(-r * T) * Nc(d2) : c + r * K * Math.exp(-r * T) * Nc(-d2)) / 365};
+}
+function optCharges(buyP, sellP){ const t = buyP + sellP, br = 40, stt = .001 * sellP, txn = .0003503 * t, sebi = t * 10 / 1e7, stamp = .00003 * buyP;
+  return br + stt + txn + sebi + stamp + .18 * (br + txn + sebi); }
+const istNow = () => new Date(Date.now() + 5.5 * 3600e3);                       // IST wall clock held in UTC fields
+const yrsTo = (exp, from) => Math.max(0, (Date.parse(exp + 'T15:30:00Z') - from.getTime()) / 6e4 / 525600);
+const istStr = () => istNow().toISOString().slice(0, 16).replace('T', ' ');
+const olChainOf = () => OPT && OPT.chains[$('#olSym').value];
+const olExpOf = () => { const c = olChainOf(); return c && c.expiries[+$('#olExp').value || 0]; };
+const olRowOf = () => { const e = olExpOf(); return e && e.strikes.find(s => s.strike === +$('#olK').value); };
+function olFillSym(){
+  const c = olChainOf(); if (!c) return;
+  $('#olExp').innerHTML = c.expiries.map((e, i) => `<option value="${i}">${esc(e.expiry)} (${fmt(e.days, 0)} days)</option>`).join('');
+  $('#olSpot').value = c.spot_now ?? c.spot; olFillExp();
+}
+function olFillExp(){
+  const e = olExpOf(); if (!e || !e.strikes.length) return;
+  const S = +$('#olSpot').value, atm = e.strikes.reduce((a, b) => Math.abs(b.strike - S) < Math.abs(a.strike - S) ? b : a);
+  $('#olK').innerHTML = e.strikes.map(s => `<option value="${s.strike}"${s === atm ? ' selected' : ''}>${fmt(s.strike, s.strike % 1 ? 2 : 0)}</option>`).join('');
+  olFillIV(); olRenderChain();
+}
+function olFillIV(){ const r = olRowOf(), c = olChainOf(), cp = $('#olCp').value;
+  $('#olIV').value = (r && r[cp] && r[cp].iv) || c.atm_iv || c.hv20 || 20; olCalc(); }
+function olState(){
+  const c = olChainOf(), e = olExpOf(); if (!c || !e) return null;
+  const S = +$('#olSpot').value, K = +$('#olK').value, cp = $('#olCp').value, side = +$('#olSide').value, r = OPT.r;
+  const lots = Math.max(1, Math.round(+$('#olLots').value || 1)), qty = c.lot * lots, v = Math.max(0.01, (+$('#olIV').value || 20) / 100);
+  const hold = Math.max(0, +$('#olHold').value || 0), T = yrsTo(e.expiry, istNow()), T2 = Math.max(0, T - hold / 8760);
+  return {c, e, S, K, cp, side, r, lots, qty, v, hold, T, T2, p: bs(S, K, T, v, cp, r)};
+}
+function olCalc(){
+  const st = olState(); if (!st) return;
+  const {c, e, S, K, cp, side, r, lots, qty, v, hold, T, T2, p} = st, g = grk(S, K, T, v, cp, r), row = olRowOf();
+  const prem = p * qty, ch = optCharges(prem, prem), close = row && row[cp] ? row[cp].close : null;
+  const fav = (side > 0) === (cp === 'CE') ? 1 : -1;                              // price direction that helps this position
+  const pnlAt = x => side * (bs(S * (1 + fav * x), K, T2, v, cp, r) - p) * qty - ch;
+  const flat = pnlAt(0);
+  let be = null;
+  if (flat >= 0) be = 0;
+  else if (pnlAt(0.25) > 0) { let lo = 0, hi = 0.25; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (pnlAt(m) > 0) hi = m; else lo = m; } be = hi * 100; }
+  const typ = c.move_pct, rng = c.range_pct;
+  const beTxt = be == null ? '<span class="dn">more than 25% — practically out of reach</span>'
+    : be === 0 ? '<span class="up">none: time decay pays you while the price stays put</span>'
+    : `<b>${fmt(be, 2)}%</b> (₹${fmt(S * be / 100)}) ${fav > 0 ? 'up' : 'down'}`;
+  $('#olOut').innerHTML = `
+    <div class="row"><span class="mute">Premium per share</span><span><b>₹${fmt(p)}</b> now (estimate)${close != null ? ` · ₹${fmt(close)} at NSE close ${esc(OPT.asof)}` : ''}</span></div>
+    <div class="row"><span class="mute">${side > 0 ? 'You pay' : 'You receive'} (${lots} lot${lots > 1 ? 's' : ''} × ${c.lot})</span><b>${rs(prem)}</b></div>
+    <div class="row"><span class="mute">Delta · theta · vega</span><span>${fmt(g.delta * side, 2)} · <span class="${cls(g.theta * side)}">${rs(g.theta * qty * side)}/day</span> · ${rs(g.vega * qty * side)} per vol point</span></div>
+    <div class="row"><span class="mute">Charges, in and out</span><span>${rs(ch)}</span></div>
+    <div class="row"><span class="mute">If price doesn't move for ${fmt(hold, 2)} h</span><span class="${cls(flat)}">${rs(flat)}</span></div>
+    <div class="row"><span class="mute">Move needed in ${fmt(hold, 2)} h to break even</span><span>${beTxt}</span></div>
+    <div class="row"><span class="mute">Typical day for ${esc(c.symbol)} (last 20)</span><span>${typ == null ? '—' : `open→close ${fmt(typ, 2)}% · high-low range ${fmt(rng, 2)}%`}</span></div>
+    ${side < 0 ? '<div class="small dn" style="margin-top:6px"><b>Selling (writing) options:</b> the most you can earn is the premium, but losses can be many times larger if the price jumps. Brokers block a large margin (often ₹1 lakh+ per lot). This lab does not calculate margin.</div>' : ''}`;
+  $('#olNote').textContent = `${fmt(T * 365, 2)} days to expiry · IV ${fmt(v * 100, 1)}% · 20-day realised vol ${c.hv20 == null ? '—' : fmt(c.hv20, 1) + '%'}`;
+  olDrawPay(st, ch);
+}
+function olDrawPay(st, ch){
+  const {S, K, cp, side, qty, v, T2, r, p} = st, W = 640, H = 240, pad = 44, n = 120, lo = S * 0.92, hi = S * 1.08;
+  const xs = Array.from({length: n + 1}, (_, i) => lo + (hi - lo) * i / n);
+  const yE = xs.map(x => side * ((cp === 'CE' ? Math.max(0, x - K) : Math.max(0, K - x)) - p) * qty - ch);
+  const yH = xs.map(x => side * (bs(x, K, T2, v, cp, r) - p) * qty - ch);
+  const all = yE.concat(yH), y0 = Math.min(0, ...all), y1 = Math.max(0, ...all), span = (y1 - y0) || 1;
+  const X = x => pad + (x - lo) / (hi - lo) * (W - 2 * pad), Y = y => H - pad / 1.5 - (y - y0) / span * (H - pad * 1.4);
+  const path = ys => xs.map((x, i) => `${i ? 'L' : 'M'}${X(x).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join('');
+  $('#olPay').innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Profit and loss chart">
+    <line x1="${pad}" x2="${W - pad}" y1="${Y(0)}" y2="${Y(0)}" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="${X(S)}" x2="${X(S)}" y1="10" y2="${H - pad / 1.5}" style="stroke:var(--mute);stroke-dasharray:3 3"/>
+    <line x1="${X(K)}" x2="${X(K)}" y1="10" y2="${H - pad / 1.5}" style="stroke:var(--violet);stroke-dasharray:1 4"/>
+    <path d="${path(yE)}" style="fill:none;stroke:var(--blue);stroke-width:2.2"/>
+    <path d="${path(yH)}" style="fill:none;stroke:var(--acc);stroke-width:2;stroke-dasharray:6 4"/>
+    <text x="${pad - 6}" y="${Y(y1) + 4}" text-anchor="end" style="fill:var(--up);font-size:11px">${rs(y1)}</text>
+    <text x="${pad - 6}" y="${Y(y0) + 4}" text-anchor="end" style="fill:var(--dn);font-size:11px">${rs(y0)}</text>
+    <text x="${pad - 6}" y="${Y(0) + 4}" text-anchor="end" style="fill:var(--mute);font-size:11px">₹0</text>
+    <text x="${X(lo)}" y="${H - 6}" style="fill:var(--mute);font-size:11px">${fmt(lo, 0)} (−8%)</text>
+    <text x="${X(S)}" y="${H - 6}" text-anchor="middle" style="fill:var(--ink);font-size:11px">now ${fmt(S, 0)}</text>
+    <text x="${X(hi)}" y="${H - 6}" text-anchor="end" style="fill:var(--mute);font-size:11px">${fmt(hi, 0)} (+8%)</text>
+    <text x="${X(K) + 4}" y="20" style="fill:var(--violet);font-size:11px">strike ${fmt(K, 0)}</text></svg>`;
+}
+function olRenderChain(){
+  const c = olChainOf(), e = olExpOf(); if (!c || !e) return;
+  const S = +$('#olSpot').value || c.spot, atm = e.strikes.reduce((a, b) => Math.abs(b.strike - S) < Math.abs(a.strike - S) ? b : a);
+  const cell = (s, cp) => s[cp] ? `<td class="click" data-k="${s.strike}" data-cp="${cp}"><b>${fmt(s[cp].close)}</b><div class="small mute">IV ${s[cp].iv == null ? '—' : fmt(s[cp].iv, 1)} · OI ${lakh(s[cp].oi)}</div></td>` : '<td class="mute">—</td>';
+  $('#olChainNote').textContent = `${c.symbol} ${e.expiry} · lot ${c.lot}`;
+  $('#olChain').innerHTML = '<tr><th>Call</th><th style="text-align:center">Strike</th><th>Put</th></tr>' + e.strikes.map(s =>
+    `<tr${s === atm ? ' class="sel"' : ''}>${cell(s, 'CE')}<td style="text-align:center"><b>${fmt(s.strike, s.strike % 1 ? 2 : 0)}</b>${s === atm ? '<div class="small mute">at the money</div>' : ''}</td>${cell(s, 'PE')}</tr>`).join('');
+  document.querySelectorAll('#olChain td[data-k]').forEach(td => td.onclick = () => { $('#olCp').value = td.dataset.cp; $('#olK').value = td.dataset.k; olFillIV(); });
+}
+const olPapers = () => { try { return JSON.parse(store.get('optpaper', '[]')) || []; } catch (e) { return []; } };
+const olSavePapers = a => store.set('optpaper', JSON.stringify(a));
+function olMark(t){
+  if (t.closed) return t.exit;
+  const c = OPT && OPT.chains[t.sym], S = c ? (c.spot_now ?? c.spot) : t.spot;
+  return bs(S, t.K, yrsTo(t.exp, istNow()), t.iv, t.cp, OPT ? OPT.r : 0.065);
+}
+function olPnl(t, px){ const q = t.lot * t.lots, ent = t.entry * q, now = px * q;
+  return t.side * (now - ent) - (t.side > 0 ? optCharges(ent, now) : optCharges(now, ent)); }
+function olRenderPaper(){
+  const a = olPapers();
+  if (!a.length) { $('#olPaperT').innerHTML = '<tr><td class="mute" style="text-align:left">No paper trades yet. Build a trade above and press "Paper-trade this".</td></tr>'; return; }
+  const closed = a.filter(t => t.closed), wins = closed.filter(t => olPnl(t, t.exit) > 0).length, tot = closed.reduce((s, t) => s + olPnl(t, t.exit), 0);
+  $('#olPaperNote').textContent = `Saved in this browser only · ${closed.length} closed: ${wins} won, total ${rs(tot)} after charges · open trades valued at the model price`;
+  $('#olPaperT').innerHTML = '<tr><th>Opened (IST)</th><th>Option</th><th>Side</th><th>Lots</th><th>Entry ₹</th><th>Now / exit ₹</th><th>P&amp;L after charges</th><th></th></tr>' +
+    a.slice().reverse().map(t => { const px = olMark(t), pl = olPnl(t, px);
+      return `<tr><td>${esc(t.opened)}</td><td><b>${esc(t.sym)} ${fmt(t.K, t.K % 1 ? 2 : 0)} ${t.cp}</b><div class="small mute">expiry ${esc(t.exp)}</div></td>
+        <td class="${t.side > 0 ? 'up' : 'dn'}">${t.side > 0 ? 'BUY' : 'SELL'}</td><td>${t.lots}</td><td>${fmt(t.entry)}</td><td>${fmt(px)}${t.closed ? '<div class="small mute">closed ' + esc(t.closed) + '</div>' : ''}</td>
+        <td class="${cls(pl)}"><b>${rs(pl)}</b></td><td>${t.closed ? '' : `<button class="ghost small" data-close="${t.id}">Close</button>`} <button class="ghost small" data-del="${t.id}">Remove</button></td></tr>`; }).join('');
+  document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => { const a2 = olPapers(), t = a2.find(x => x.id == b.dataset.close);
+    if (t) { t.exit = olMark(t); t.closed = istStr(); olSavePapers(a2); olRenderPaper(); } });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { olSavePapers(olPapers().filter(x => x.id != b.dataset.del)); olRenderPaper(); });
+}
+function olRenderBt(B){
+  if (!B) { $('#olBtText').textContent = 'Run research/options_backtest.py to fill this table.'; return; }
+  $('#olBtNote').textContent = `${B.sessions} sessions, ${B.period} · 1 lot, at-the-money, nearest expiry · bid-ask ${B.slippage_pct.index}% index / ${B.slippage_pct.stock}% stock per side`;
+  const tr = (name, g, x) => x ? `<tr><td><b>${esc(name)}</b></td><td>${g}</td><td>${x.trades}</td><td>${fmt(x.win_net, 1)}%</td><td>${rs(x.premium)}</td>
+    <td class="${cls(x.gross)}">${rs(x.gross)}</td><td>${rs(x.charges)}</td><td>${rs(x.slip)}</td><td class="${cls(x.net)}"><b>${rs(x.net)}</b></td><td class="${cls(x.net_pct_premium)}">${sgn(x.net_pct_premium, 1, '%')}</td></tr>` : '';
+  $('#olBt').innerHTML = '<tr><th>Setup</th><th>Options on</th><th>Trades</th><th>Win (net)</th><th>Premium / lot</th><th>Before costs</th><th>Charges</th><th>Bid-ask</th><th>Net / trade</th><th>Net % of premium</th></tr>' +
+    Object.values(B.setups).map(s => tr(s.name, 'indices', s.index) + tr(s.name, 'stocks', s.stock)).join('') + tr('All signals', 'all', B.all);
+  const a = B.all, x = B.expiry_day;
+  $('#olBtText').innerHTML = `Buying options on these signals lost about <b>${rs(-a.net)}</b> per trade after costs (${sgn(a.net_pct_premium, 1, '%')} of the premium paid), winning ${fmt(a.win_net, 0)}% of the time. ` +
+    (x ? `On expiry days it was worse: ${sgn(x.net_pct_premium, 1, '%')} of premium. ` : '') +
+    `The same signals traded in shares made ${rs(a.cash_gross)} before costs and ${rs(a.cash_net)} after, per ₹1 lakh. Options don't create an edge the signal doesn't have; they add time decay and wider spreads. Model estimate (Black-Scholes with each option's previous-day implied volatility), not actual fills.`;
+}
+async function loadOpt(){
+  try {
+    if (STATIC && !STATIC.options) throw new Error('This snapshot was built before the Options lab existed.');
+    const r = await fetch(STATIC ? STATIC.options : '/api/options'), O = await r.json();
+    if (!r.ok) throw new Error(O.error || 'Could not load option prices');
+    OPT = O;
+    const idx = O.symbols.filter(s => O.chains[s].index), rest = O.symbols.filter(s => !O.chains[s].index);
+    $('#olSym').innerHTML = idx.concat(rest).map(s => `<option>${esc(s)}</option>`).join('');
+    $('#olSym').value = O.chains.NIFTY ? 'NIFTY' : O.symbols[0];
+    $('#olSub').textContent = `Option closes from NSE for ${O.asof} · underlying prices up to ${(O.chains[$('#olSym').value] || {}).spot_time || '—'} · ${O.symbols.length} underlyings`;
+    olFillSym(); olRenderPaper(); olRenderBt(O.backtest);
+  } catch (e) { $('#olSub').textContent = e.message.includes('fetch') ? 'Cannot reach the local server. Is intraday_dashboard.py still running?' : e.message; }
+}
+$('#olSym').onchange = olFillSym; $('#olExp').onchange = olFillExp; $('#olCp').onchange = olFillIV; $('#olK').onchange = olFillIV;
+['#olSide', '#olLots', '#olSpot', '#olIV', '#olHold'].forEach(s => $(s).oninput = olCalc);
+$('#olPaper').onclick = () => { const st = olState(); if (!st) return;
+  const a = olPapers(); a.push({id: Date.now(), sym: st.c.symbol, exp: st.e.expiry, K: st.K, cp: st.cp, side: st.side, lots: st.lots, lot: st.c.lot,
+    entry: Math.round(st.p * 100) / 100, iv: st.v, spot: st.S, opened: istStr()}); olSavePapers(a); olRenderPaper(); };
+
 function tab(n){
-  [['plan', '#plan', '#tabPlan'], ['desk', '#desk', '#tabDesk'], ['scan', '#scanner', '#tabScan'], ['inst', '#inst', '#tabInst'], ['picks', '#picks', '#tabPicks']].forEach(([k, sec, btn]) => {
+  [['plan', '#plan', '#tabPlan'], ['desk', '#desk', '#tabDesk'], ['scan', '#scanner', '#tabScan'], ['inst', '#inst', '#tabInst'], ['picks', '#picks', '#tabPicks'], ['opt', '#opt', '#tabOpt']].forEach(([k, sec, btn]) => {
     $(sec).classList.toggle('hidden', n !== k); $(btn).classList.toggle('on', n === k); });
   store.set('tab', n);
+  if (n === 'opt' && !OPT) loadOpt();
   if (n === 'picks' && !PICKS) loadPicks();
   if (n === 'scan' && !$('#scT').innerHTML) runScan();
   if (n === 'plan' && !PLAN) loadPlan();
   if (n === 'inst' && !INST) loadInst();
   if (n === 'desk' && S.D) requestAnimationFrame(() => render(S.D, false));
 }
-$('#tabPicks').onclick = () => tab('picks'); $('#pfAmt').oninput = renderPortfolio; $('#tabInst').onclick = () => tab('inst'); $('#tabPlan').onclick = () => tab('plan'); $('#tabDesk').onclick = () => tab('desk'); $('#tabScan').onclick = () => tab('scan'); $('#scGo').onclick = runScan;
+$('#tabOpt').onclick = () => tab('opt'); $('#tabPicks').onclick = () => tab('picks'); $('#pfAmt').oninput = renderPortfolio; $('#tabInst').onclick = () => tab('inst'); $('#tabPlan').onclick = () => tab('plan'); $('#tabDesk').onclick = () => tab('desk'); $('#tabScan').onclick = () => tab('scan'); $('#scGo').onclick = runScan;
 
 // Calculators (same charge model as the backtest)
 function charges(buyV, sellV){ const t = buyV + sellV, br = Math.min(20, .0003 * buyV) + Math.min(20, .0003 * sellV), stt = .00025 * sellV,
@@ -1750,13 +1994,22 @@ def build_snapshot(outdir: str, interval: str = "5m", sessions: int = 6, capital
         print(f"  monthly picks: ranked on {K['formed']}, journal {'updated' if journal else 'read only'}")
     except Exception as e:  # noqa: BLE001
         print(f"  monthly picks skipped: {e}")
+    options_file = None
+    try:
+        O = options_payload()
+        with open(os.path.join(outdir, "data", "_options.json"), "w", encoding="utf-8") as f:
+            json.dump(O, f, separators=(",", ":"))
+        options_file = "data/_options.json"
+        print(f"  options lab: {len(O['chains'])} option chains from NSE close of {O['asof']}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  options lab skipped: {e}")
     latest = max(last_bars) if last_bars else ""
     try:
         until = dt.datetime.strptime(latest, "%Y-%m-%d %H:%M").strftime("%d %b %Y, %H:%M")
     except ValueError:
         until = latest
     index = dict(generated=gen, gen_ts=int(time.time()), data_until=until, symbols=list(files), files=files, scan="data/_scan.json",
-                 plan="data/_plan.json", inst="data/_inst.json", picks=picks_file)
+                 plan="data/_plan.json", inst="data/_inst.json", picks=picks_file, options=options_file)
     with open(os.path.join(outdir, "index.html"), "w", encoding="utf-8") as f:
         f.write(standalone_page(index) if standalone else hosted_page(index))
     print(f"Snapshot written to {outdir} ({len(files)} symbols, data up to {until})")

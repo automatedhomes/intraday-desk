@@ -9,3 +9,5 @@ trades_*.csv
 site/
 # this PC only
 live_tick.ps1
+# NSE bhavcopy downloads
+cache/

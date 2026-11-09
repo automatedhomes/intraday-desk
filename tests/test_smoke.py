@@ -177,6 +177,38 @@ def test_journal_rebalance_rules():
     assert not first["open"] and abs(first["net"] - (first["gross"] - idd.PICK_COST_PCT)) < 0.02
 
 
+def test_options_pricing_parity_iv_and_charges():
+    import options_lab as ol
+    S, K, T, v, r = 25000.0, 25100.0, 7 / 365, 0.16, ol.RISK_FREE
+    c, p = ol.bs_price(S, K, T, v, "CE"), ol.bs_price(S, K, T, v, "PE")
+    assert abs((c - p) - (S - K * np.exp(-r * T))) < 1e-6                       # put-call parity
+    assert abs(ol.implied_vol(c, S, K, T, "CE") - v) < 1e-4                     # IV round trip
+    g = ol.greeks(S, K, T, v, "CE")
+    assert 0 < g["delta"] < 1 and g["theta"] < 0 and g["vega"] > 0
+    assert ol.greeks(S, K, T, v, "PE")["delta"] < 0
+    assert ol.bs_price(S, K, 0, v, "PE") == 100.0                               # expiry = intrinsic value
+    assert ol.implied_vol(10.0, S, 24000.0, T, "CE") is None                    # below intrinsic
+    ch = ol.option_charges(10_000, 12_000)
+    assert abs(ch["brokerage"] - 40) < 1e-9 and abs(ch["stt"] - 12.0) < 1e-9 and abs(ch["stamp"] - 0.3) < 1e-9
+    assert 60 < ch["total"] < 70
+
+
+def test_option_chain_from_bhavcopy_rows():
+    import options_lab as ol
+    day = dt.date(2026, 11, 9)
+    rows = []
+    for e in (day, dt.date(2026, 11, 17)):
+        for k in (24900.0, 25000.0, 25100.0):
+            for cp in ("CE", "PE"):
+                T = ol.years_to_expiry(dt.datetime(2026, 11, 9, 15, 30), e)
+                px = ol.bs_price(25010.0, k, T, 0.15, cp) if T > 0 else 1.0
+                rows.append(dict(symbol="NIFTY", expiry=e, strike=k, cp=cp, close=round(px, 2), settle=px, spot=25010.0,
+                                 oi=1000.0, volume=10.0, lot=65.0, date=day))
+    ch = ol.chain(pd.DataFrame(rows), "NIFTY")
+    assert ch["lot"] == 65 and ch["index"] and [e["expiry"] for e in ch["expiries"]] == ["2026-11-17"]   # expired one dropped
+    assert abs(ol.atm_iv(ch) - 15.0) < 0.3
+
+
 def test_resolve_and_tv_symbols():
     assert idd.resolve("nifty") == "^NSEI" and idd.resolve("SBIN") == "SBIN.NS"
     assert idd.tv_symbol("M&M.NS") == "NSE:M_M" and idd.tv_symbol("^NSEBANK") == "NSE:BANKNIFTY"
