@@ -1,12 +1,18 @@
 # Rebuilds the Intraday Desk snapshot and publishes it to GitHub Pages every 5 minutes
 # while NSE is open (09:15-15:40 IST = 03:45-10:10 UTC, Mon-Fri, NSE holidays skipped in Python).
-# GitHub may start scheduled runs a few minutes late, so expect updates every ~5-15 minutes.
+# GitHub's own schedule is unreliable on free accounts (it ran once on 09 Nov 2026), so an outside timer
+# (cron-job.org) also calls workflow_dispatch every 5 minutes; those runs behave exactly like scheduled ones.
 name: Live snapshot
 
 on:
   schedule:
     - cron: "*/5 3-10 * * 1-5"
-  workflow_dispatch:          # "Run workflow" button: builds even when the market is closed
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build now even if the market is closed (does not touch the paper journal)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write             # to save journal/paper_journal.json when the monthly picks are logged
@@ -34,12 +40,13 @@ jobs:
       - id: snap
         name: Build snapshot
         run: |
-          # Only scheduled runs inside market hours log the paper journal, so entries use live prices.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then FLAG=""; else FLAG="--if-open --journal"; fi
+          # Automatic runs (schedule or the outside timer) build only in market hours and log the paper journal
+          # at live prices. A forced manual run builds any time and leaves the journal alone.
+          if [ "${{ inputs.force }}" = "true" ]; then FLAG=""; else FLAG="--if-open --journal"; fi
           python intraday_dashboard.py --snapshot site --standalone $FLAG
           if [ -f site/index.html ]; then echo "built=yes" >> "$GITHUB_OUTPUT"; else echo "built=no" >> "$GITHUB_OUTPUT"; fi
       - name: Save paper journal
-        if: steps.snap.outputs.built == 'yes' && github.event_name == 'schedule'
+        if: steps.snap.outputs.built == 'yes' && inputs.force != true
         run: |
           if [ -n "$(git status --porcelain journal)" ]; then
             git config user.name "github-actions[bot]"

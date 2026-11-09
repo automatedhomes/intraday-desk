@@ -99,6 +99,8 @@ Netlify, Cloudflare Pages) if the owner wants a shareable link.
 ## Live hosting (set up 09 Nov 2026)
 
 - **GitHub Pages:** https://automatedhomes.github.io/intraday-desk/ (public repo `automatedhomes/intraday-desk`).
+  GitHub's cron proved unreliable (1 run on 09 Nov), so cron-job.org POSTs workflow_dispatch every 5 min;
+  non-forced dispatches act like scheduled runs. `gh workflow run live-snapshot.yml -f force=true` builds any time.
   `.github/workflows/live-snapshot.yml` runs every 5 min 03:45-10:10 UTC Mon-Fri and builds with
   `--snapshot site --standalone --if-open` (`session_window()` skips holidays); "Run workflow" builds anytime.
   GitHub's cron often runs late. Public repos' schedules pause after 60 days without a commit.
