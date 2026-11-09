@@ -93,6 +93,29 @@ Rules below follow NSE's published index methods; 0.15%/side costs; tax 20% shor
 - Tax costs momentum about 2-3%/yr versus ~1.3%/yr for holding, which is why holding is so hard to beat.
 - Every portfolio of these stocks beats the Nifty mainly because of survivorship bias (today's winners).
 
+## 6. Institutional portfolio techniques, after costs and tax (`research/institutional_study.py`)
+
+Rules fixed before running; same engine and tax as section 5.
+
+| Portfolio | After costs | After tax | Max DD | Vol | 2016-20 | 2021-now | Turnover |
+|---|---|---|---|---|---|---|---|
+| Nifty 50 index, hold (price only) | 11.1% | 10.2% | −38% | 16% | 12.0% | 10.4% | 9% |
+| Hold the same 43 stocks | 19.9% | 18.6% | −41% | 21% | 18.4% | 21.2% | 9% |
+| Momentum top 10, monthly | 22.7% | 19.7% | −39% | 22% | 19.9% | 25.2% | 293% |
+| **+ banding (buy top 10, sell below rank 20)** | 24.9% | **22.1%** | −38% | 21% | 23.2% | 26.3% | 123% |
+| 50% banded momentum + 50% low volatility | 19.5% | 17.3% | −33% | 17% | 19.5% | 19.5% | 110% |
+| **70% Nifty + 30% banded momentum** | 15.6% | **14.1%** | −38% | 17% | 16.1% | 15.1% | 47% |
+| 70% Nifty + 30% both sleeves | 14.0% | 12.6% | −36% | 16% | 15.0% | 13.1% | 42% |
+
+Banding sensitivity (after tax): top 10 with no band 19.7%, sell below 15 22.1%, 20 22.2%, 25 25.5%, 30 26.0%;
+top 15: none 20.6%, 20 21.7%, 25 21.3%, 30 22.4%. Banding helped in every setting, so the direction is robust.
+Wider bands look even better partly because they hold past winners longer, which survivorship bias flatters:
+keep the standard 10/20 and don't widen it on this evidence.
+
+What changed in the dashboard: Monthly picks now uses banding (10/20) for momentum, the journal charges costs
+only on picks that change, and the tab shows a 70/30 core-satellite plan. Intraday setups are unchanged: no
+institutional technique fixes a strategy with no edge before costs.
+
 ## How to use these findings
 
 - Judge any new idea on its before-costs edge across many stocks first.

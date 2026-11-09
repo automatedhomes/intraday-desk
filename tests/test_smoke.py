@@ -146,6 +146,21 @@ def test_compute_picks_uses_last_month_end_only():
     assert [r["symbol"] for r in idd.compute_picks(C2, n=5)["momentum"]] == [r["symbol"] for r in P["momentum"]]
 
 
+def test_momentum_banding_keeps_holdings_within_band():
+    C = synthetic_closes(n=14)
+    base = idd.compute_picks(C, n=5, band=8)
+    order = [r["symbol"] for r in base["momentum"]]
+    full = idd.compute_picks(C, n=14, band=14)["momentum"]               # every stock, in rank order
+    rank = {r["symbol"]: r["rank"] for r in full}
+    inside = next(s for s, k in rank.items() if 5 < k <= 8)              # outside the top 5, inside the band
+    outside = next(s for s, k in rank.items() if k > 8)
+    P = idd.compute_picks(C, n=5, held=[inside, outside], band=8)
+    syms = [r["symbol"] for r in P["momentum"]]
+    assert len(syms) == 5 and inside in syms and outside not in syms
+    assert next(r for r in P["momentum"] if r["symbol"] == inside)["kept"]
+    assert syms[:4] == order[:4]                                         # the rest filled from the top
+
+
 def test_journal_rebalance_rules():
     P = idd.compute_picks(synthetic_closes(), n=5)
     J = idd.update_journal({}, P, "2026-11-09 09:20")

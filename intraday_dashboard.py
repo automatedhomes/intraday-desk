@@ -801,8 +801,9 @@ PICK_COST_PCT = 0.30                    # assumed round trip per rebalance (0.15
 JOURNAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "journal", "paper_journal.json")
 PICK_STRATS = {
     "momentum": dict(name="Momentum top 10", months=tuple(range(1, 13)), every="monthly",
-                     rule="The 10 stocks with the highest return from 12 months to 1 month before the last month-end. "
-                          "Rebalanced every month."),
+                     rule="Ranked by return from 12 months to 1 month before the last month-end. Buy the top 10; keep a "
+                          "holding until it falls below rank 20 (banding: about 60% less trading and short-term tax). "
+                          "Checked every month."),
     "lowvol": dict(name="Low volatility top 10", months=(3, 6, 9, 12), every="quarterly",
                    rule="The 10 stocks with the lowest 1-year daily volatility at the last month-end. "
                         "Rebalanced every quarter (after March, June, September and December)."),
@@ -836,8 +837,13 @@ def daily_closes(ttl: int = 3600) -> pd.DataFrame:
     return df
 
 
-def compute_picks(C: pd.DataFrame, n: int = PICK_N) -> dict:
-    """Rank on closes up to the last completed month-end; prices are the latest close."""
+PICK_BAND = 20      # banding: a momentum holding is kept until it falls below this rank (docs/FINDINGS.md s.6)
+CORE_PCT = 70       # core-satellite plan: % in a Nifty 50 index fund, the rest split over the momentum picks
+
+
+def compute_picks(C: pd.DataFrame, n: int = PICK_N, held=None, band: int = PICK_BAND) -> dict:
+    """Rank on closes up to the last completed month-end; prices are the latest close.
+    Momentum uses banding: current holdings (`held`) stay while ranked within `band`, then the top fills the rest."""
     S = C.drop(columns="NIFTY")
     last = S.index[-1]
     form = S.index[S.index.to_period("M") < last.to_period("M")][-1]
@@ -847,14 +853,25 @@ def compute_picks(C: pd.DataFrame, n: int = PICK_N) -> dict:
     ok = mom.notna() & vol.notna() & (H.tail(253).count() >= 253)
     px = S.iloc[-1]
 
-    def rows(sel):
-        return [dict(rank=i + 1, symbol=s, price=num(px[s]), mom=num(mom[s], 1), vol=num(vol[s], 1))
-                for i, s in enumerate(sel.index)]
+    ranked = mom[ok].sort_values(ascending=False)
+    mrank = {s: i + 1 for i, s in enumerate(ranked.index)}
+    keep = [s for s in (held or []) if mrank.get(s, band + 1) <= band][:n]
+    for s in ranked.index:
+        if len(keep) >= n:
+            break
+        if s not in keep:
+            keep.append(s)
+    keep.sort(key=lambda s: mrank[s])
+    lv = vol[ok].sort_values().head(n)
+
+    def row(s, rank, kept=False):
+        return dict(rank=rank, symbol=s, price=num(px[s]), mom=num(mom[s], 1), vol=num(vol[s], 1), kept=kept)
     m = int(last.month)
     q = next(x for x in (3, 6, 9, 12) if x >= m)
     return dict(formed=str(form.date()), formation=str(form.to_period("M")), asof=str(last.date()),
-                universe=int(ok.sum()), momentum=rows(mom[ok].sort_values(ascending=False).head(n)),
-                lowvol=rows(vol[ok].sort_values().head(n)),
+                universe=int(ok.sum()), band=band,
+                momentum=[row(s, mrank[s], kept=mrank[s] > n) for s in keep],
+                lowvol=[row(s, i + 1) for i, s in enumerate(lv.index)],
                 prices={s: num(px[s]) for s in S.columns if pd.notna(px[s])}, nifty=num(C["NIFTY"].iloc[-1]),
                 next=dict(momentum=dt.date(2000, m, 1).strftime("%B"), lowvol=dt.date(2000, q, 1).strftime("%B")))
 
@@ -879,8 +896,11 @@ def update_journal(J: dict, P: dict, logged: str) -> dict:
 def journal_summary(J: dict, P: dict) -> dict:
     out = {}
     for k, sp in PICK_STRATS.items():
-        rows, cum, ncum = [], 1.0, 1.0
+        rows, cum, ncum, prev = [], 1.0, 1.0, set()
         for p in J.get(k, []):
+            new = set(p["entry"])
+            changed = len(new - prev) / len(new) if new else 1.0     # kept holdings are not traded again
+            prev = new
             closed = bool(p.get("closed"))
             ex = p.get("exit") if closed else {s: P["prices"].get(s) for s in p["entry"]}
             nx = p.get("nifty_exit") if closed else P["nifty"]
@@ -888,12 +908,13 @@ def journal_summary(J: dict, P: dict) -> dict:
                       for s, e in p["entry"].items()]
             rs_ = [x["ret"] for x in picks_ if x["ret"] is not None]
             gross = float(np.mean(rs_)) if rs_ else 0.0
-            net = gross - PICK_COST_PCT
+            net = gross - PICK_COST_PCT * changed
             nifty = (nx / p["nifty_entry"] - 1) * 100 if nx and p.get("nifty_entry") else 0.0
             cum *= 1 + net / 100
             ncum *= 1 + nifty / 100
             rows.append(dict(formation=p["formation"], opened=p["opened"], closed=p.get("closed"), open=not closed,
-                             gross=num(gross), net=num(net), nifty=num(nifty), picks=picks_))
+                             gross=num(gross), net=num(net), nifty=num(nifty), changed=num(changed * 100, 0),
+                             picks=picks_))
         out[k] = dict(name=sp["name"], every=sp["every"], started=rows[0]["opened"] if rows else None,
                       periods=rows, cum_net=num((cum - 1) * 100), cum_nifty=num((ncum - 1) * 100))
     return out
@@ -911,15 +932,16 @@ def picks(write_journal: bool = False) -> dict:
     hit = _picks_cache.get("p")
     if hit and time.time() - hit[0] < 300 and not write_journal:
         return hit[1]
-    P = compute_picks(daily_closes())
     J = load_journal()
+    open_mom = [p for p in J.get("momentum", []) if not p.get("closed")]
+    P = compute_picks(daily_closes(), held=list(open_mom[-1]["entry"]) if open_mom else None)
     if write_journal:
         J = update_journal(J, P, now_ist().strftime("%Y-%m-%d %H:%M"))
         os.makedirs(os.path.dirname(JOURNAL_PATH), exist_ok=True)
         with open(JOURNAL_PATH, "w", encoding="utf-8") as f:
             json.dump(J, f, indent=1)
-    out = {k: P[k] for k in ("formed", "formation", "asof", "universe", "momentum", "lowvol", "next")}
-    out.update(generated=now_ist().strftime("%d %b %Y %H:%M"), cost_pct=PICK_COST_PCT,
+    out = {k: P[k] for k in ("formed", "formation", "asof", "universe", "band", "momentum", "lowvol", "next")}
+    out.update(generated=now_ist().strftime("%d %b %Y %H:%M"), cost_pct=PICK_COST_PCT, core_pct=CORE_PCT,
                rules={k: v["rule"] for k, v in PICK_STRATS.items()}, journal=journal_summary(J, P))
     _picks_cache["p"] = (time.time(), out)
     return out
@@ -1194,6 +1216,13 @@ BODY = r"""<header>
     not in every period; low volatility earned less but fell less (−28% worst fall vs −41%). Both results are flattered by
     hindsight because the list is today's large caps. The journal below tracks the picks on paper from the day they were
     logged, so you can see whether they keep working before risking money.</div>
+  <div class="card"><div class="row"><h2>Portfolio plan (core-satellite)</h2><span class="note">How large fund managers combine a cheap index core with a factor tilt</span></div>
+    <div class="form" style="max-width:420px"><label>Amount to invest (₹)<input id="pfAmt" type="number" min="1000" step="1000" value="100000"></label></div>
+    <div id="pfPlan" class="out"></div>
+    <p class="note">Backtest 2016–2026 after costs and tax (docs/FINDINGS.md section 6): 70% Nifty + 30% banded momentum made about 14.1% a year
+      against 10.2% for the Nifty alone (price index; add ~1.3% a year for dividends) with a similar worst fall (−38%). All-momentum made more
+      (about 22%) but is far riskier and the most flattered by hindsight. The core is an index fund or ETF you hold for years; only the
+      satellite changes each month. Long-term holdings, not intraday trades. Not investment advice.</p></div>
   <div class="tools">
     <div class="card"><div class="row"><h2>Momentum top 10</h2><span class="note" id="pkMomNext"></span></div>
       <p class="note" id="pkMomRule"></p><div class="scroll"><table id="pkMom"></table></div></div>
@@ -1516,9 +1545,17 @@ async function loadInst(){
   } catch (e) { const b = $('#inErr'); b.textContent = e.message.includes('fetch') ? 'Cannot reach the local server. Is intraday_dashboard.py still running?' : e.message; b.style.display = 'block'; }
 }
 let PICKS = null;
+function renderPortfolio(){
+  if (!PICKS) return;
+  const amt = Math.max(0, +$('#pfAmt').value || 0), core = PICKS.core_pct / 100, n = PICKS.momentum.length || 1;
+  const each = amt * (1 - core) / n;
+  $('#pfPlan').innerHTML = `<div class="row"><span><b>Core: Nifty 50 index fund / ETF</b> (${fmt(PICKS.core_pct, 0)}%)</span><b>${rs(amt * core)}</b></div>
+    <div class="row"><span><b>Satellite: momentum picks</b> (${fmt(100 - PICKS.core_pct, 0)}%, ${n} stocks)</span><b>${rs(amt * (1 - core))}</b></div>
+    <div class="lvchips" style="margin-top:6px">${PICKS.momentum.map(r => `<span>${esc(r.symbol)} <b>${rs(each)}</b> ≈ ${r.price ? Math.floor(each / r.price) : 0} sh</span>`).join('')}</div>`;
+}
 function pickRows(rows){
   return '<tr><th>#</th><th>Symbol</th><th>Price</th><th>12-1m return</th><th>1y volatility</th></tr>' + rows.map(r =>
-    `<tr class="click" data-open="${esc(r.symbol)}"><td>${r.rank}</td><td><b>${esc(r.symbol)}</b></td><td>₹${fmt(r.price)}</td>
+    `<tr class="click" data-open="${esc(r.symbol)}"><td>${r.rank}${r.kept ? ' <span class="tag" title="Kept by banding: still within the top ' + (PICKS ? PICKS.band : 20) + '">kept</span>' : ''}</td><td><b>${esc(r.symbol)}</b></td><td>₹${fmt(r.price)}</td>
      <td class="${cls(r.mom)}">${sgn(r.mom, 1, '%')}</td><td>${fmt(r.vol, 1)}%</td></tr>`).join('');
 }
 function journalCard(j){
@@ -1541,7 +1578,8 @@ function renderPicks(P){
   $('#pkMomRule').textContent = P.rules.momentum; $('#pkLowRule').textContent = P.rules.lowvol;
   $('#pkMomNext').textContent = `next re-rank after ${P.next.momentum} ends`; $('#pkLowNext').textContent = `next re-rank after ${P.next.lowvol} ends`;
   $('#pkMom').innerHTML = pickRows(P.momentum); $('#pkLow').innerHTML = pickRows(P.lowvol);
-  $('#pkJNote').textContent = `Equal money in each pick · about ${fmt(P.cost_pct, 2)}% costs per rebalance · tax not included · paper only`;
+  $('#pkJNote').textContent = `Equal money in each pick · about ${fmt(P.cost_pct, 2)}% costs on the stocks that change · tax not included · paper only`;
+  renderPortfolio();
   $('#pkJournal').innerHTML = journalCard(P.journal.momentum) + journalCard(P.journal.lowvol);
   document.querySelectorAll('#picks [data-open]').forEach(el => el.onclick = () => { $('#sym').value = el.dataset.open; tab('desk'); load(); });
 }
@@ -1563,7 +1601,7 @@ function tab(n){
   if (n === 'inst' && !INST) loadInst();
   if (n === 'desk' && S.D) requestAnimationFrame(() => render(S.D, false));
 }
-$('#tabPicks').onclick = () => tab('picks'); $('#tabInst').onclick = () => tab('inst'); $('#tabPlan').onclick = () => tab('plan'); $('#tabDesk').onclick = () => tab('desk'); $('#tabScan').onclick = () => tab('scan'); $('#scGo').onclick = runScan;
+$('#tabPicks').onclick = () => tab('picks'); $('#pfAmt').oninput = renderPortfolio; $('#tabInst').onclick = () => tab('inst'); $('#tabPlan').onclick = () => tab('plan'); $('#tabDesk').onclick = () => tab('desk'); $('#tabScan').onclick = () => tab('scan'); $('#scGo').onclick = runScan;
 
 // Calculators (same charge model as the backtest)
 function charges(buyV, sellV){ const t = buyV + sellV, br = Math.min(20, .0003 * buyV) + Math.min(20, .0003 * sellV), stt = .00025 * sellV,

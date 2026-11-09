@@ -112,6 +112,8 @@ Netlify, Cloudflare Pages) if the owner wants a shareable link.
 - `journal/paper_journal.json` is the forward paper record. Only the scheduled GitHub run writes it
   (`--if-open --journal`) and commits it, at live prices; local runs read it. **`git pull --rebase` before pushing.**
   `update_journal` opens a period when a rebalance is due and closes the previous one at the same prices.
+- Momentum uses banding (`PICK_BAND = 20`): `picks()` passes the open journal holdings to `compute_picks(held=...)`.
+  `CORE_PCT = 70` drives the core-satellite card. Evidence: docs/FINDINGS.md section 6.
 
 ## Backlog ideas (ask the owner before starting)
 
