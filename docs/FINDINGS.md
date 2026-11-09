@@ -155,7 +155,11 @@ Tested on 62 sessions (12 Aug – 9 Nov 2026), 13,440 setups settled at the real
 - Chance-of-profit was well calibrated (e.g. 35% predicted → 36% actual, 75% → 74%) and higher predicted-EV
   deciles realised more (corr 0.13).
 - But the window was falling: bought puts +₹8,101, bought calls −₹6,360 per lot; bearish setups won, bullish lost.
-  Only ~3 monthly expiry cycles. Treat the top 10 as unproven; the automatic paper record is the real test.
+  Only ~3 monthly expiry cycles. (The Nifty rose 2.5%, but many single stocks fell.)
+- Direction-neutral check (same setup type, same day, top vs bottom half by predicted EV): the higher-rated half
+  did better in 5 of 6 setup types and the correlation was positive in all six (+0.01 to +0.41). So the ranking
+  adds some value beyond direction, but the overall profit level was set mostly by the falling stocks.
+  Treat the top 10 as unproven; the automatic paper record is the real test.
 - Right after results season, 20-day realised vol includes one-off result-day jumps (e.g. RELIANCE 45.7% vs
   21.3% implied on 9 Nov), which pushes the model toward buying options.
 
