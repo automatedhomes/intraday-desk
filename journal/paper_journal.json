@@ -1,0 +1,45 @@
+{
+ "started": "2026-11-11 15:26",
+ "momentum": [
+  {
+   "formation": "2026-10",
+   "formed": "2026-10-30",
+   "opened": "2026-11-11 15:26",
+   "closed": null,
+   "entry": {
+    "SHRIRAMFIN": 965.45,
+    "ADANIPORTS": 1907.4,
+    "TITAN": 4965.0,
+    "BAJAJ-AUTO": 10985.0,
+    "HINDALCO": 959.0,
+    "ADANIENT": 2707.0,
+    "INDUSINDBK": 900.0,
+    "COALINDIA": 404.45,
+    "JSWSTEEL": 1350.9,
+    "SUNPHARMA": 1894.0
+   },
+   "nifty_entry": 25130.0
+  }
+ ],
+ "lowvol": [
+  {
+   "formation": "2026-10",
+   "formed": "2026-10-30",
+   "opened": "2026-11-11 15:26",
+   "closed": null,
+   "entry": {
+    "SUNPHARMA": 1894.0,
+    "NTPC": 326.2,
+    "ICICIBANK": 1567.0,
+    "POWERGRID": 263.45,
+    "RELIANCE": 1329.2,
+    "BHARTIARTL": 2085.0,
+    "KOTAKBANK": 483.0,
+    "HDFCBANK": 802.0,
+    "TATAPOWER": 361.0,
+    "HINDUNILVR": 2012.0
+   },
+   "nifty_entry": 25130.0
+  }
+ ]
+}
